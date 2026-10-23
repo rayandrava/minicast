@@ -23,6 +23,8 @@ class NativeSurface {
     bool bind();
     bool transparentInput=false;
     bool lightTheme=true;
+    bool commitPending=false;
+    UINT pixelWidth=0,pixelHeight=0;
     bool extend_frame();
     void use_opaque_backdrop();
 public:
@@ -33,7 +35,8 @@ public:
     bool create(HWND hwnd,ID2D1Factory* factory,Com<ID2D1RenderTarget>& out,bool light=true);
     void set_theme(HWND hwnd,bool light);
     void reset();
-    void resize(UINT width,UINT height);
+    bool resize(UINT width,UINT height);
+    void trim();
     HRESULT present();
 };
 }

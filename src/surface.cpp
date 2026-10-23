@@ -1,6 +1,7 @@
 #include "surface.hpp"
 #include "theme.hpp"
 #include <dwmapi.h>
+#include <dxgi1_3.h>
 #include <algorithm>
 namespace mini {
 bool NativeSurface::extend_frame(){
@@ -32,7 +33,7 @@ bool NativeSurface::bind(){
     context->SetTarget(bitmap.p);context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);return true;
 }
 void NativeSurface::reset(){
-    if(context)context->SetTarget(nullptr);bitmap.reset();if(visual)visual->SetContent(static_cast<IUnknown*>(nullptr));if(composition)composition->Commit();visual.reset();destination.reset();composition.reset();swap.reset();context.reset();device.reset();dxgi.reset();gpu.reset();fallback.reset();acrylic=false;
+    if(context)context->SetTarget(nullptr);bitmap.reset();if(visual)visual->SetContent(static_cast<IUnknown*>(nullptr));if(composition)composition->Commit();visual.reset();destination.reset();composition.reset();swap.reset();context.reset();device.reset();dxgi.reset();gpu.reset();fallback.reset();acrylic=false;commitPending=false;pixelWidth=pixelHeight=0;
 }
 void NativeSurface::set_theme(HWND hwnd,bool light){
     lightTheme=light;
@@ -75,17 +76,42 @@ bool NativeSurface::create(HWND hwnd,ID2D1Factory* factory,Com<ID2D1RenderTarget
     if(SUCCEEDED(hr))hr=destination->SetRoot(visual.p);
     if(SUCCEEDED(hr)&&bind()){
         set_theme(hwnd,light);
-        if(SUCCEEDED(composition->Commit())){
-            context->AddRef();out.p=context.p;return true;
-        }
+        // Attach only after the first populated buffer is presented.
+        commitPending=true;pixelWidth=width;pixelHeight=height;
+        context->AddRef();out.p=context.p;return true;
     }
     reset();use_opaque_backdrop();auto properties=D2D1::RenderTargetProperties();properties.dpiX=properties.dpiY=96;
     if(FAILED(factory->CreateHwndRenderTarget(properties,D2D1::HwndRenderTargetProperties(hwnd,D2D1::SizeU(width,height)),fallback.put())))return false;
+    pixelWidth=width;pixelHeight=height;
     apply_window_theme(hwnd,light);apply_palette_frame(hwnd);fallback->AddRef();out.p=fallback.p;return true;
 }
-void NativeSurface::resize(UINT width,UINT height){
-    if(!width||!height)return;if(fallback){fallback->Resize(D2D1::SizeU(width,height));return;}if(acrylic&&!extend_frame())use_opaque_backdrop();
-    if(swap&&context){context->SetTarget(nullptr);bitmap.reset();if(SUCCEEDED(swap->ResizeBuffers(0,width,height,DXGI_FORMAT_UNKNOWN,0)))bind();}
+bool NativeSurface::resize(UINT width,UINT height){
+    if(!width||!height||(width==pixelWidth&&height==pixelHeight))return true;
+    if(fallback){if(FAILED(fallback->Resize(D2D1::SizeU(width,height))))return false;}
+    else if(swap&&context){
+        if(acrylic&&!extend_frame())use_opaque_backdrop();
+        context->SetTarget(nullptr);bitmap.reset();
+        if(FAILED(swap->ResizeBuffers(0,width,height,DXGI_FORMAT_UNKNOWN,0))||!bind())return false;
+    }else return false;
+    pixelWidth=width;pixelHeight=height;return true;
 }
-HRESULT NativeSurface::present(){return swap?swap->Present(1,0):S_OK;}
+void NativeSurface::trim(){
+    // Release driver-internal caches while retaining the bounded palette and
+    // icon surfaces. Recreating the entire device after one second hidden made
+    // hotkey latency depend on how recently the launcher had been used.
+    Com<IDXGIDevice3> trimDevice;
+    if(dxgi&&SUCCEEDED(dxgi->QueryInterface(__uuidof(IDXGIDevice3),reinterpret_cast<void**>(trimDevice.put()))))trimDevice->Trim();
+}
+HRESULT NativeSurface::present(){
+    if(!swap)return S_OK;
+    HRESULT hr=swap->Present(1,0);
+    if(SUCCEEDED(hr)&&commitPending){
+        hr=composition->Commit();
+        // Only on creation/recovery: ensure the populated tree is processed
+        // before show() reveals it. Normal frames never wait on a DComp commit.
+        if(SUCCEEDED(hr))hr=composition->WaitForCommitCompletion();
+        if(SUCCEEDED(hr))commitPending=false;
+    }
+    return hr;
+}
 }

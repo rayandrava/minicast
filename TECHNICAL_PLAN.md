@@ -4,7 +4,7 @@ Minicast is a Windows x64 C++20 application using Win32 for lifecycle/input, Dir
 
 ## UI and input
 
-The palette is 750 × 475 DIPs. Windows app-theme notifications select the tint; documented Desktop Acrylic supplies the backdrop on supported systems. Native rounded corners and shadow are requested without a painted outer border. GPU surfaces are released after the palette has been hidden for one second.
+The palette is 750 × 475 DIPs. Windows app-theme notifications select the tint; documented Desktop Acrylic supplies the backdrop on supported systems. Native rounded corners and shadow are requested without a painted outer border. Opening prepares the result list and presents a populated frame before revealing the window. The renderer and bounded icon cache remain available between openings; after one minute hidden, a one-shot timer trims driver caches without destroying the device or palette buffers. Camera frames are still released immediately on hide. This trades some retained graphics memory for consistent reopening; it does not introduce an idle render loop. Actual size changes and device loss are handled separately.
 
 System RichEdit text services draw the transparent search field, retaining native text selection, IME and accessibility support. HWND metrics are physical pixels, font sizes are twips and ordinary Direct2D coordinates are DIPs. The editor and drawing target synchronize their DPI explicitly. An opaque native EDIT is the fallback when text services cannot initialize.
 

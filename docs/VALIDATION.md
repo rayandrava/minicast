@@ -36,6 +36,40 @@ The console tests do not read the system clipboard, open a camera, change startu
 
 ## Before publishing the first alpha
 
+### Opening-frame correction (2026-10-24)
+
+The previous hide timer destroyed the graphics device after one second, making
+reopening depend on time spent hidden. The window was also shown before its mode
+and first frame were prepared. Opening now prepares content while hidden, presents
+before revealing the window, and retains the renderer between uses. Identical-size
+notifications no longer recreate buffers; failed resize/draw operations discard
+the device for recovery. A one-shot timer trims driver caches after one minute
+hidden. Camera resources still stop/release on hide.
+
+Validation: `build.ps1 -Test -Output dist/launch-frame-preview/Minicast.exe
+-Repository rayandrava/minicast` passed all 422 console assertions and binary
+resource checks. The executable is 1,122,304 bytes. The optional
+`scripts/probe-palette-render.ps1` diagnostic passed 72 checks using the production
+palette in a hidden window: first/repeated frames, renderer retention, cache trim,
+resize, explicit graphics recreation and theme change. The window stayed hidden
+and the foreground window was unchanged. No tray, startup, clipboard, camera or
+running-app state was changed.
+
+Diagnostic observations on this machine: initial hidden frame 281.7 ms; 20 warm
+hidden frames averaged 14.8 ms (maximum 18.5 ms); private allocations were 17.3 MB
+after the initial frame, 14.3 MB after trimming and 11.2 MB after releasing graphics.
+These are diagnostic-process measurements, not end-to-end hotkey latency, GPU
+memory totals or full-app idle-RAM benchmarks. The new policy retains graphics
+memory to avoid repeated device creation.
+
+The user reported that the preview's opening behavior appears to work after
+trying it. This is initial visual feedback, not a completed test matrix. Still
+to check systematically: cold launch, rapid toggles, reopening after more than a
+minute hidden, stale-frame/blank-frame flashes, focus/caret, mixed-DPI monitors and
+the opaque fallback. The installed app has not been replaced by this preview.
+
+### Remaining manual checks
+
 These checks remain manual. Record the Windows build, display scale and devices actually used; do not mark them complete based on console tests.
 
 1. Check the current Settings layout, version label and update command. A build without `-Repository` must explain that the release page is unconfigured. A configured build should open the intended repository's Releases page.

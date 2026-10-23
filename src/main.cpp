@@ -36,7 +36,7 @@
 using namespace mini;
 namespace {
 constexpr UINT MSG_TRAY=WM_APP+1,MSG_APPS=WM_APP+2,MSG_CLIP=WM_APP+3,MSG_RATE=WM_APP+4,MSG_CAMERA=WM_APP+5,MSG_SHOW=WM_APP+6,MSG_STATUS=WM_APP+7,MSG_QUERY=WM_APP+8,MSG_ICONS=WM_APP+9;
-constexpr int ID_QUERY=100,TIMER_PASTE=2,TIMER_TOAST=3,TIMER_SMOKE=4,TIMER_RELEASE_GRAPHICS=5,TIMER_HISTORY_EXPIRY=6;
+constexpr int ID_QUERY=100,TIMER_PASTE=2,TIMER_TOAST=3,TIMER_SMOKE=4,TIMER_TRIM_GRAPHICS=5,TIMER_HISTORY_EXPIRY=6;
 constexpr int PALETTE_WIDTH=750,PALETTE_HEIGHT=475,ROW_TOP=92,ROW_HEIGHT=38,VISIBLE_ROWS=9,FOOTER_TOP=434;
 constexpr int SETTINGS_COMMAND=201,SETTINGS_HOTKEY=202,SETTINGS_REMOVE=205,SETTINGS_HISTORY=206,SETTINGS_CLEAR=207,SETTINGS_REFRESH=208;
 enum class Mode { Home,Apps,Convert,Emoji,Clipboard,Camera };
@@ -280,7 +280,7 @@ struct App {
     }
 #include "palette.inl"
     void hint(){InvalidateRect(edit,nullptr,TRUE);}
-    void set_mode(Mode next){popup=0;gridOffset=0;cameraPending=false;if(mode==Mode::Camera&&next!=Mode::Camera){camera.stop();cameraBitmap.reset();cameraSequence=0;}mode=next;query.clear();SetWindowTextW(edit,L"");selected=scroll=0;hint();if(next==Mode::Camera)cameraPending=!camera.start(hwnd,MSG_CAMERA,cameraDevice);rebuild(false);SetFocus(edit);}
+    void set_mode(Mode next){popup=0;gridOffset=0;cameraPending=false;if(mode==Mode::Camera&&next!=Mode::Camera){camera.stop();cameraBitmap.reset();cameraSequence=0;}mode=next;query.clear();SetWindowTextW(edit,L"");selected=scroll=0;hint();if(next==Mode::Camera)cameraPending=!camera.start(hwnd,MSG_CAMERA,cameraDevice);rebuild(false);if(IsWindowVisible(hwnd))SetFocus(edit);}
     void refresh_region(){auto current=local_currency_code();if(current!=localCurrency){localCurrency=std::move(current);rebuild();}}
     void place_palette(){
         POINT point=savedPosition;if(!positionSaved)GetCursorPos(&point);
@@ -316,10 +316,25 @@ struct App {
         POINT screen{GET_X_LPARAM(point),GET_Y_LPARAM(point)};ClientToScreen(source,&screen);
         ReleaseCapture();SendMessageW(hwnd,WM_NCLBUTTONDOWN,HTCAPTION,MAKELPARAM(screen.x,screen.y));
     }
-    void show(Mode next,bool toggle=true){refresh_theme();refresh_region();KillTimer(hwnd,TIMER_RELEASE_GRAPHICS);if(IsWindowVisible(hwnd)&&mode==next&&toggle){hide();return;}
-        if(!IsWindowVisible(hwnd)){previous=GetForegroundWindow();place_palette();ShowWindow(hwnd,SW_SHOW);}
-        SetForegroundWindow(hwnd);set_mode(next);}
-    void hide(bool restoreFocus=true){popup=0;appIcons.cancel_pending();cameraPending=false;camera.stop();cameraBitmap.reset();cameraSequence=0;if(!IsWindowVisible(hwnd))return;ShowWindow(hwnd,SW_HIDE);SetTimer(hwnd,TIMER_RELEASE_GRAPHICS,1000,nullptr);if(restoreFocus&&previous&&IsWindow(previous))SetForegroundWindow(previous);}
+    void show(Mode next,bool toggle=true){
+        if(IsWindowVisible(hwnd)&&mode==next&&toggle){hide();return;}
+        KillTimer(hwnd,TIMER_TRIM_GRAPHICS);
+        refresh_theme();refresh_region();
+        const bool opening=!IsWindowVisible(hwnd);
+        if(opening){previous=GetForegroundWindow();place_palette();}
+        set_mode(next);
+        if(opening){
+            // Populate and present the new mode while hidden. Showing an empty
+            // composition surface before WM_PAINT caused an intermittent flash.
+            // Retry once if the graphics device was lost while in the tray.
+            if(!render_frame())render_frame();
+            ShowWindow(hwnd,SW_SHOW);
+        }
+        SetForegroundWindow(hwnd);SetFocus(edit);
+        // Also covers the opaque HWND fallback, whose hidden draw may be clipped.
+        RedrawWindow(hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN);
+    }
+    void hide(bool restoreFocus=true){popup=0;appIcons.cancel_pending();cameraPending=false;camera.stop();cameraBitmap.reset();cameraSequence=0;if(!IsWindowVisible(hwnd))return;ShowWindow(hwnd,SW_HIDE);SetTimer(hwnd,TIMER_TRIM_GRAPHICS,60000,nullptr);if(restoreFocus&&previous&&IsWindow(previous))SetForegroundWindow(previous);}
     void update_query(){
         int length=GetWindowTextLengthW(edit);std::wstring latest(length+1,L'\0');
         GetWindowTextW(edit,latest.data(),length+1);latest.resize(length);
@@ -456,7 +471,7 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         case WM_TIMER:
             if(wp==TIMER_HISTORY_EXPIRY){if(app->expire_history()&&app->resultMode==Mode::Clipboard)app->rebuild();}
             if(wp==TIMER_TOAST){KillTimer(hwnd,TIMER_TOAST);app->toast.clear();app->invalidate();}
-            if(wp==TIMER_RELEASE_GRAPHICS){KillTimer(hwnd,TIMER_RELEASE_GRAPHICS);if(!IsWindowVisible(hwnd))app->release_graphics();}
+            if(wp==TIMER_TRIM_GRAPHICS){KillTimer(hwnd,TIMER_TRIM_GRAPHICS);if(!IsWindowVisible(hwnd))app->surface.trim();}
             if(wp==TIMER_PASTE){if(GetForegroundWindow()!=app->pasteTarget){KillTimer(hwnd,TIMER_PASTE);return 0;}if(paste_to(app->pasteTarget)||++app->pasteAttempts>=20)KillTimer(hwnd,TIMER_PASTE);}
             if(wp==TIMER_SMOKE){if(app->smokeStage==0){app->smoke_sample("open");app->set_mode(Mode::Convert);SetWindowTextW(app->edit,L"25 c to f");app->update_query();}else if(app->smokeStage==1){app->smoke_sample("converter");app->hide();}else if(app->smokeStage==2){app->smoke_sample("idle");DestroyWindow(hwnd);}app->smokeStage++;}return 0;
         case WM_HOTKEY:
@@ -482,7 +497,7 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         case WM_MOUSEWHEEL:app->wheel(GET_WHEEL_DELTA_WPARAM(wp));return 0;
         case WM_DPICHANGED:{auto* r=reinterpret_cast<RECT*>(lp);SetWindowPos(hwnd,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);app->layout();app->invalidate();return 0;}
         case WM_DISPLAYCHANGE:app->tray(true);app->invalidate();return 0; // Restore/clamp on the next show, without visible intermediate moves.
-        case WM_SIZE:if(app->target){app->surface.resize(LOWORD(lp),HIWORD(lp));app->invalidate();}return 0;
+        case WM_SIZE:if(app->target){if(!app->surface.resize(LOWORD(lp),HIWORD(lp)))app->release_graphics();app->invalidate();}return 0;
         case WM_ACTIVATEAPP:if(!wp&&IsWindowVisible(hwnd))app->hide(false);return 0;
         case WM_TIMECHANGE:if(app->expire_history()&&app->resultMode==Mode::Clipboard)app->rebuild();return 0;
         case WM_POWERBROADCAST:if(wp==PBT_APMSUSPEND){app->cameraPending=false;app->camera.stop();}else if(wp==PBT_APMRESUMEAUTOMATIC){if(app->expire_history()&&app->resultMode==Mode::Clipboard)app->rebuild();}return TRUE;

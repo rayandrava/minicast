@@ -271,8 +271,8 @@ void paint_footer() {
     auto primary=primary_label();if(!primary.empty()){aligned(primary,440,445,151,24,body.p,ink(),DWRITE_TEXT_ALIGNMENT_TRAILING);outline(598,446,18,18,rule(),3);draw_icon("corner-down-left",602,450,10,muted());}
     rect(628,447,1,15,rule());text(L"Actions",641,445,51,24,body.p,muted());keycap(L"Ctrl",694,446,26);keycap(L"K",724,446,17);
 }
-void paint() {
-    PAINTSTRUCT ps;BeginPaint(hwnd,&ps);if(!init_graphics()){EndPaint(hwnd,&ps);return;}
+bool render_frame() {
+    if(!init_graphics())return false;
     target->BeginDraw();target->SetTransform(D2D1::Matrix3x2F::Scale(scale,scale));target->Clear(color(0,0,0,0));
     // DWM supplies live blur and noise. A denser, brighter neutral tint gives
     // the Start-menu-like opacity requested without introducing separate
@@ -284,6 +284,15 @@ void paint() {
     if(mode==Mode::Camera)paint_camera();else if(emoji_view())paint_emoji();else if(clipboard_view())paint_clipboard();else if(conversionCard)paint_conversion();else paint_list();
     if(rows.empty()&&mode!=Mode::Camera&&!clipboard_view())aligned(indexing&&apps.empty()?L"Finding apps…":L"No Results",175,225,400,29,body.p,muted(),DWRITE_TEXT_ALIGNMENT_CENTER);
     paint_footer();if(popup)paint_popup();
-    auto hr=target->EndDraw();if(SUCCEEDED(hr))hr=surface.present();if(hr==D2DERR_RECREATE_TARGET||hr==DXGI_ERROR_DEVICE_REMOVED||hr==DXGI_ERROR_DEVICE_RESET)release_graphics();EndPaint(hwnd,&ps);
+    auto hr=target->EndDraw();if(SUCCEEDED(hr))hr=surface.present();
+    if(FAILED(hr))release_graphics();
+    return SUCCEEDED(hr);
+}
+void paint() {
+    PAINTSTRUCT ps;BeginPaint(hwnd,&ps);
+    // Background index/rate updates may invalidate a hidden palette. Keep it
+    // idle; show() explicitly renders fresh content before making it visible.
+    if(IsWindowVisible(hwnd))render_frame();
+    EndPaint(hwnd,&ps);
 }
 #include "palette_actions.inl"
