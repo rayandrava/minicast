@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible problem with Minicast.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, follow SECURITY.md instead. Do not include clipboard contents, credentials, full profile folders or unredacted personal paths.
+  - type: input
+    id: version
+    attributes:
+      label: Minicast version or commit
+      placeholder: Version shown by the build, or the commit used to build it
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and display scale
+      placeholder: Windows 11, version/build, 150% scale; note multiple monitors if relevant
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use a small, synthetic example. Include relevant settings or shortcut combinations.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Optional evidence
+      description: Add redacted screenshots, exact error text, or measured timings. Include light/dark theme and GPU details only when relevant.

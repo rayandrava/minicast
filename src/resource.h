@@ -1,0 +1,4 @@
+#pragma once
+#define IDI_MINICAST 101
+#define IDI_MINICAST_TRAY_LIGHT 102
+#define IDI_MINICAST_TRAY_DARK 103

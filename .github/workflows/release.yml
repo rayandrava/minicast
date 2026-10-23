@@ -1,0 +1,102 @@
+name: Draft Windows release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Require tag to match VERSION
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          if ($env:RELEASE_TAG -cne "v$version") { throw 'Release tag must be v plus VERSION.' }
+      - name: Verify pinned compiler
+        run: ./scripts/bootstrap.ps1
+      - name: Console checks and portable package
+        env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: ./scripts/package-release.ps1 -OutputDirectory dist/tag-release -Repository $env:RELEASE_REPOSITORY
+      - name: Upload only release files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: minicast-release
+          path: |
+            dist/tag-release/Minicast-*-windows-x64.zip
+            dist/tag-release/SHA256SUMS.txt
+            dist/tag-release/release.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  draft:
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # No checkout or executable from the build runs in this write-token job.
+      - name: Download this run's release files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: minicast-release
+          path: release-files
+      - name: Validate package and create a draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metadata = Get-Content -LiteralPath release-files/release.json -Raw | ConvertFrom-Json
+          if ($env:RELEASE_TAG -cne "v$($metadata.version)" -or
+              $metadata.repository -cne $env:GH_REPO -or
+              $metadata.source_commit -cne $env:RELEASE_COMMIT -or
+              $metadata.target -ne 'windows-x64') { throw 'Release metadata does not match this tagged build.' }
+          $packageName = "Minicast-$($metadata.version)-windows-x64.zip"
+          if ($packageName -notmatch '^Minicast-\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?-windows-x64\.zip$' -or
+              $metadata.package -cne $packageName) { throw 'Unexpected release package name.' }
+          $expected = @($packageName, 'SHA256SUMS.txt', 'release.json') | Sort-Object
+          $actual = @(Get-ChildItem -LiteralPath release-files -File -Force | Select-Object -ExpandProperty Name | Sort-Object)
+          if ((Compare-Object $expected $actual) -or @(Get-ChildItem -LiteralPath release-files -Directory -Force).Count) {
+              throw 'Unexpected files in release artifact.'
+          }
+          $packagePath = Join-Path release-files $packageName
+          $packageHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($packageHash -cne $metadata.sha256) { throw 'Package checksum mismatch.' }
+          $metadataHash = (Get-FileHash -LiteralPath release-files/release.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest = Get-Content -LiteralPath release-files/SHA256SUMS.txt
+          if ($manifest.Count -ne 2 -or $manifest[0] -cne "$packageHash  $packageName" -or
+              $manifest[1] -cne "$metadataHash  release.json") { throw 'Release checksum manifest mismatch.' }
+          @'
+          Windows x64 portable alpha. Extract the ZIP to a permanent folder, then run Minicast.exe.
+
+          This draft requires maintainer review and desktop smoke testing before publication.
+          The executable is unsigned. SHA-256 checksums verify file integrity; they are not a publisher signature.
+          Updates are manual: use Check for Updates, exit Minicast from its tray menu, then replace the extracted files.
+          '@ | Set-Content -LiteralPath release-notes.md -Encoding utf8
+          gh release create $env:RELEASE_TAG $packagePath release-files/SHA256SUMS.txt release-files/release.json --repo $env:GH_REPO --verify-tag --draft --prerelease --title "Minicast $($metadata.version)" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; existing releases are never overwritten.' }

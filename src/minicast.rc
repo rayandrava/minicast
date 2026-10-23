@@ -1,0 +1,36 @@
+#include <winver.h>
+#include "resource.h"
+#include "version.h"
+
+// Keep the application icon first: Explorer uses it for the executable.
+IDI_MINICAST ICON "minicast.ico"
+IDI_MINICAST_TRAY_LIGHT ICON "tray-light.ico"
+IDI_MINICAST_TRAY_DARK ICON "tray-dark.ico"
+
+1 VERSIONINFO
+ FILEVERSION MINICAST_VERSION_TUPLE
+ PRODUCTVERSION MINICAST_VERSION_TUPLE
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS MINICAST_VERSION_FILEFLAGS
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Minicast\0"
+            VALUE "FileDescription", "Minicast native Windows launcher\0"
+            VALUE "FileVersion", MINICAST_VERSION_RESOURCE_STRING
+            VALUE "InternalName", "Minicast\0"
+            VALUE "OriginalFilename", "Minicast.exe\0"
+            VALUE "ProductName", "Minicast\0"
+            VALUE "ProductVersion", MINICAST_VERSION_RESOURCE_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

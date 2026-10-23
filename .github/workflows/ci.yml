@@ -1,0 +1,43 @@
+name: Windows build
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify pinned compiler
+        run: ./scripts/bootstrap.ps1
+      - name: Console checks and portable package
+        env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: ./scripts/package-release.ps1 -OutputDirectory dist/ci-release -Repository $env:RELEASE_REPOSITORY
+      - name: Upload review artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: minicast-windows-x64-${{ github.sha }}
+          path: |
+            dist/ci-release/Minicast-*-windows-x64.zip
+            dist/ci-release/SHA256SUMS.txt
+            dist/ci-release/release.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

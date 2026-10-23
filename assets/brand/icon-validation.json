@@ -1,0 +1,209 @@
+[
+  {
+    "File": "minicast.ico",
+    "Bytes": 28506,
+    "Frames": [
+      {
+        "Size": 16,
+        "PngBytes": 714,
+        "ClearPixels": 12,
+        "AntialiasedPixels": 52,
+        "OpaquePixels": 192
+      },
+      {
+        "Size": 20,
+        "PngBytes": 869,
+        "ClearPixels": 18,
+        "AntialiasedPixels": 72,
+        "OpaquePixels": 310
+      },
+      {
+        "Size": 24,
+        "PngBytes": 1110,
+        "ClearPixels": 31,
+        "AntialiasedPixels": 92,
+        "OpaquePixels": 453
+      },
+      {
+        "Size": 32,
+        "PngBytes": 1484,
+        "ClearPixels": 66,
+        "AntialiasedPixels": 186,
+        "OpaquePixels": 772
+      },
+      {
+        "Size": 40,
+        "PngBytes": 1814,
+        "ClearPixels": 203,
+        "AntialiasedPixels": 142,
+        "OpaquePixels": 1255
+      },
+      {
+        "Size": 48,
+        "PngBytes": 2144,
+        "ClearPixels": 274,
+        "AntialiasedPixels": 171,
+        "OpaquePixels": 1859
+      },
+      {
+        "Size": 64,
+        "PngBytes": 2898,
+        "ClearPixels": 451,
+        "AntialiasedPixels": 375,
+        "OpaquePixels": 3270
+      },
+      {
+        "Size": 128,
+        "PngBytes": 5621,
+        "ClearPixels": 2190,
+        "AntialiasedPixels": 757,
+        "OpaquePixels": 13437
+      },
+      {
+        "Size": 256,
+        "PngBytes": 11702,
+        "ClearPixels": 9498,
+        "AntialiasedPixels": 1509,
+        "OpaquePixels": 54529
+      }
+    ]
+  },
+  {
+    "File": "tray-light.ico",
+    "Bytes": 17115,
+    "Frames": [
+      {
+        "Size": 16,
+        "PngBytes": 478,
+        "ClearPixels": 155,
+        "AntialiasedPixels": 74,
+        "OpaquePixels": 27
+      },
+      {
+        "Size": 20,
+        "PngBytes": 601,
+        "ClearPixels": 254,
+        "AntialiasedPixels": 98,
+        "OpaquePixels": 48
+      },
+      {
+        "Size": 24,
+        "PngBytes": 650,
+        "ClearPixels": 383,
+        "AntialiasedPixels": 107,
+        "OpaquePixels": 86
+      },
+      {
+        "Size": 32,
+        "PngBytes": 884,
+        "ClearPixels": 699,
+        "AntialiasedPixels": 157,
+        "OpaquePixels": 168
+      },
+      {
+        "Size": 40,
+        "PngBytes": 1077,
+        "ClearPixels": 1124,
+        "AntialiasedPixels": 186,
+        "OpaquePixels": 290
+      },
+      {
+        "Size": 48,
+        "PngBytes": 1302,
+        "ClearPixels": 1636,
+        "AntialiasedPixels": 238,
+        "OpaquePixels": 430
+      },
+      {
+        "Size": 64,
+        "PngBytes": 1700,
+        "ClearPixels": 2977,
+        "AntialiasedPixels": 310,
+        "OpaquePixels": 809
+      },
+      {
+        "Size": 128,
+        "PngBytes": 3309,
+        "ClearPixels": 12227,
+        "AntialiasedPixels": 622,
+        "OpaquePixels": 3535
+      },
+      {
+        "Size": 256,
+        "PngBytes": 6964,
+        "ClearPixels": 49536,
+        "AntialiasedPixels": 1258,
+        "OpaquePixels": 14742
+      }
+    ]
+  },
+  {
+    "File": "tray-dark.ico",
+    "Bytes": 20078,
+    "Frames": [
+      {
+        "Size": 16,
+        "PngBytes": 480,
+        "ClearPixels": 155,
+        "AntialiasedPixels": 74,
+        "OpaquePixels": 27
+      },
+      {
+        "Size": 20,
+        "PngBytes": 626,
+        "ClearPixels": 254,
+        "AntialiasedPixels": 98,
+        "OpaquePixels": 48
+      },
+      {
+        "Size": 24,
+        "PngBytes": 709,
+        "ClearPixels": 383,
+        "AntialiasedPixels": 107,
+        "OpaquePixels": 86
+      },
+      {
+        "Size": 32,
+        "PngBytes": 998,
+        "ClearPixels": 699,
+        "AntialiasedPixels": 157,
+        "OpaquePixels": 168
+      },
+      {
+        "Size": 40,
+        "PngBytes": 1264,
+        "ClearPixels": 1124,
+        "AntialiasedPixels": 186,
+        "OpaquePixels": 290
+      },
+      {
+        "Size": 48,
+        "PngBytes": 1515,
+        "ClearPixels": 1636,
+        "AntialiasedPixels": 238,
+        "OpaquePixels": 430
+      },
+      {
+        "Size": 64,
+        "PngBytes": 1992,
+        "ClearPixels": 2977,
+        "AntialiasedPixels": 310,
+        "OpaquePixels": 809
+      },
+      {
+        "Size": 128,
+        "PngBytes": 4018,
+        "ClearPixels": 12227,
+        "AntialiasedPixels": 622,
+        "OpaquePixels": 3535
+      },
+      {
+        "Size": 256,
+        "PngBytes": 8326,
+        "ClearPixels": 49536,
+        "AntialiasedPixels": 1258,
+        "OpaquePixels": 14742
+      }
+    ]
+  }
+]
