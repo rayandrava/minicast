@@ -32,27 +32,37 @@ bool list_group_header(int index) const {
     return !conversionCard&&!rows.empty()&&(resultMode==Mode::Home||resultMode==Mode::Apps)&&!rows.front().group.empty()&&
         (index==first||rows[index].group!=rows[index-1].group);
 }
-float list_row_offset(int index) const {
-    float y=0;for(int i=conversionCard?1:0;i<=index&&i<int(rows.size());++i){
-        if(list_group_header(i))y+=26;
-        if(i==index)return y;y+=ROW_HEIGHT;
-    }return y;
+void build_list_layout(){
+    listPositions.assign(rows.size(),0.f);listHeight=0;
+    for(int i=conversionCard?1:0;i<int(rows.size());++i){
+        if(list_group_header(i))listHeight+=26;
+        listPositions[i]=listHeight;listHeight+=ROW_HEIGHT;
+    }
 }
-float list_content_height() const {return int(rows.size())<=(conversionCard?1:0)?0.f:list_row_offset(int(rows.size())-1)+ROW_HEIGHT;}
+float list_row_offset(int index) const {return index>=0&&index<int(listPositions.size())?listPositions[index]:0.f;}
+float list_content_height() const {return listHeight;}
 ListLayout visible_list(float offset) const {
-    ListLayout result;float y=list_top()-offset;
-    for(int index=conversionCard?1:0;index<int(rows.size());++index){
-        bool header=list_group_header(index);if(header)y+=26;
+    ListLayout result;int first=conversionCard?1:0;
+    if(int(listPositions.size())<=first)return result;
+    auto begin=std::upper_bound(listPositions.begin()+first,listPositions.end(),offset-ROW_HEIGHT);
+    for(int index=int(begin-listPositions.begin());index<int(rows.size());++index){
+        float y=list_top()+listPositions[index]-offset;bool header=list_group_header(index);
         if(y-(header?26:0)>=FOOTER_TOP)break;
-        if(y+ROW_HEIGHT>list_top()&&result.count<int(result.items.size()))result.items[result.count++]={index,y,header};
-        y+=ROW_HEIGHT;
+        if(result.count<int(result.items.size()))result.items[result.count++]={index,y,header};
     }return result;
 }
 int list_capacity() const {return std::max(1,int((FOOTER_TOP-list_top())/ROW_HEIGHT));}
 float maximum_list_scroll() const {return std::max(0.f,list_content_height()-(FOOTER_TOP-list_top()));}
-void stop_scroll_animation(){KillTimer(hwnd,TIMER_SCROLL);scrollAnimating=false;}
+void schedule_scroll_frame(){
+    // One-shot timer, active only during scrolling. Presentation retains VSync.
+    LARGE_INTEGER due{};due.QuadPart=-10000;
+    if(scrollTimer&&SetWaitableTimer(scrollTimer,&due,0,nullptr,nullptr,FALSE))return;
+    if(scrollTimer){CloseHandle(scrollTimer);scrollTimer=nullptr;}
+    SetTimer(hwnd,TIMER_SCROLL,16,nullptr);
+}
+void stop_scroll_animation(){if(scrollTimer)CancelWaitableTimer(scrollTimer);KillTimer(hwnd,TIMER_SCROLL);scrollAnimating=false;}
 void animate_scroll(){
-    ULONGLONG now=GetTickCount64();float elapsed=float(now-scrollTick);scrollTick=now;
+    auto now=std::chrono::steady_clock::now();float elapsed=std::chrono::duration<float,std::milli>(now-scrollTick).count();scrollTick=now;
     float& offset=emoji_view()?gridOffset:scroll;
     float maximum=emoji_view()?std::max(0.f,gridHeight-FOOTER_TOP):maximum_list_scroll();
     scrollTarget=std::clamp(scrollTarget,0.f,maximum);
@@ -64,7 +74,7 @@ void scroll_to(float value,bool animate){
     float maximum=emoji_view()?std::max(0.f,gridHeight-FOOTER_TOP):maximum_list_scroll();
     scrollTarget=std::clamp(value,0.f,maximum);
     viewportScrolled=true;hover=-1;
-    if(animate){if(!scrollAnimating){scrollTick=GetTickCount64();scrollAnimating=true;SetTimer(hwnd,TIMER_SCROLL,16,nullptr);}}
+    if(animate){if(!scrollAnimating){scrollTick=std::chrono::steady_clock::now();scrollAnimating=true;schedule_scroll_frame();}}
     else {stop_scroll_animation();if(emoji_view())gridOffset=scrollTarget;else scroll=scrollTarget;}
     invalidate();
 }
@@ -271,10 +281,14 @@ void paint_clipboard() {
     if(item->dib.empty())text(item->text.substr(0,12000),313,94,407,184,previewText.p,ink());
     else {
         BITMAPINFOHEADER h{};memcpy(&h,item->dib.data(),sizeof(h));
-        Com<ID2D1Bitmap> bitmap;auto properties=D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_IGNORE));
-        target->CreateBitmap(D2D1::SizeU(h.biWidth,-h.biHeight),item->dib.data()+40,h.biWidth*4,properties,bitmap.put());
+        auto properties=D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_IGNORE));
+        if(!clipboardBitmap||clipboardBitmapIdentity!=item->timestamp){
+            clipboardBitmap.reset();
+            target->CreateBitmap(D2D1::SizeU(h.biWidth,-h.biHeight),item->dib.data()+40,h.biWidth*4,properties,clipboardBitmap.put());
+            clipboardBitmapIdentity=item->timestamp;
+        }
         float fit=std::min(407.f/h.biWidth,184.f/-h.biHeight),w=h.biWidth*fit,hh=-h.biHeight*fit;
-        if(bitmap)target->DrawBitmap(bitmap.p,D2D1::RectF(313+(407-w)/2,94+(184-hh)/2,313+(407+w)/2,94+(184+hh)/2));
+        if(clipboardBitmap)target->DrawBitmap(clipboardBitmap.p,D2D1::RectF(313+(407-w)/2,94+(184-hh)/2,313+(407+w)/2,94+(184+hh)/2));
     }
     text(L"Information",300,294,420,22,small.p,muted());
     auto metadata=[&](const std::wstring& key,const std::wstring& value,float y){text(key,300,y,125,23,small.p,muted());aligned(value,423,y,310,23,small.p,ink(),DWRITE_TEXT_ALIGNMENT_TRAILING);rect(300,y+25,433,1,rule());};

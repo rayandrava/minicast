@@ -1,5 +1,6 @@
 // App's unified command/query routing. No tabs are needed to reach any feature.
 void rebuild(bool preserveSelection = true) {
+    textLayouts.clear();clipboardBitmap.reset();clipboardBitmapIdentity=0;
     std::optional<Row> previousRow;
     if (preserveSelection && selected >= 0 && selected < int(rows.size())) previousRow = rows[selected];
     rows.clear();
@@ -196,7 +197,7 @@ void rebuild(bool preserveSelection = true) {
         selected = found == rows.end() ? 0 : int(found - rows.begin());
     }
     selected = std::clamp(selected, 0, std::max(0, int(rows.size()) - 1));
-    build_grid();
+    build_list_layout();build_grid();
     if(preserveSelection&&viewportScrolled){
         scroll=std::clamp(scroll,0.f,maximum_list_scroll());
     }else ensure_selection_visible();

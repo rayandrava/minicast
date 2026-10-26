@@ -10,6 +10,14 @@ The local build passed **485 assertions with zero failures** across eleven conso
 
 Lists now render partially visible rows using pixel offsets. Wheel and track-click animations stop their timer on completion; scrollbar dragging updates the offset directly. Clipboard filters, dimensions, stored size and dropdown styling are included. The executable and embedded icons passed build verification. These latest UI changes have not been live-tested; manual interaction and visual checks remain outstanding.
 
+## Scrolling performance follow-up (2026-10-26)
+
+The follow-up build passed **492 assertions with zero failures** across twelve console test programs. Text layout cache checks verify that 1,000 repeated lookups reuse one DirectWrite layout, that width/alignment changes receive distinct layouts, and that retained entries stay bounded. Clipboard previews reuse their uploaded bitmap until the selection, history or graphics device changes. Result geometry is computed when results change; painting locates visible rows with a binary search.
+
+Precision wheel deltas update the viewport directly. Ordinary wheel input uses shorter easing, immediate reversal and a high-resolution one-shot waitable timer, with a standard Windows timer fallback. Input remains serviced by the message loop, VSync remains enabled, queued GPU frames are limited to one, and animation scheduling stops at rest. No live UI performance measurements were taken; actual frame times and perceived responsiveness still need user verification.
+
+Implementation references: [Microsoft DirectWrite layout reuse](https://learn.microsoft.com/en-us/windows/win32/direct2d/direct2d-and-directwrite) and [high-resolution waitable timers](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createwaitabletimerexw).
+
 ## Automated package gates
 
 `scripts/package-release.ps1` runs all of these before producing a ZIP. A failed check stops packaging; a successfully generated package has completed the gates. Console output supplies the assertion counts and any compiler warnings.

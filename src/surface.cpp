@@ -59,6 +59,7 @@ bool NativeSurface::create(HWND hwnd,ID2D1Factory* factory,Com<ID2D1RenderTarget
     HRESULT hr=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,gpu.put(),nullptr,nullptr);
     Com<ID2D1Factory1> upgraded;Com<IDXGIAdapter> adapter;Com<IDXGIFactory2> dxgiFactory;
     if(SUCCEEDED(hr))hr=gpu->QueryInterface(__uuidof(IDXGIDevice),reinterpret_cast<void**>(dxgi.put()));
+    if(SUCCEEDED(hr)){Com<IDXGIDevice1> latency;if(SUCCEEDED(dxgi->QueryInterface(__uuidof(IDXGIDevice1),reinterpret_cast<void**>(latency.put()))))latency->SetMaximumFrameLatency(1);}
     if(SUCCEEDED(hr))hr=factory->QueryInterface(__uuidof(ID2D1Factory1),reinterpret_cast<void**>(upgraded.put()));
     if(SUCCEEDED(hr))hr=upgraded->CreateDevice(dxgi.p,device.put());
     if(SUCCEEDED(hr))hr=device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,context.put());

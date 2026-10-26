@@ -60,6 +60,10 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Clipboard history test compilation failed' }
     & '.\build\history_tests.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Clipboard history tests failed' }
+    & $compiler @common 'tests/text_layout_cache_tests.cpp' '-ldwrite' '-luuid' '-o' 'build/text_layout_cache_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Text cache test compilation failed' }
+    & '.\build\text_layout_cache_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Text cache tests failed' }
     & $compiler @common 'tests/smooth_scroll_tests.cpp' '-o' 'build/smooth_scroll_tests.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Smooth scroll test compilation failed' }
     & '.\build\smooth_scroll_tests.exe'

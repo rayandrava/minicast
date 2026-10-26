@@ -102,6 +102,10 @@ void wheel(int delta) {
     if(!lines)return;
     float viewport=FOOTER_TOP-(emoji_view()?66.f:list_top());
     float distance=lines==WHEEL_PAGESCROLL?viewport:float(lines)*ROW_HEIGHT;
-    float current=scrollAnimating?scrollTarget:(emoji_view()?gridOffset:scroll);
-    scroll_to(current-float(delta)/WHEEL_DELTA*distance,true);
+    bool precision=(delta%WHEEL_DELTA)!=0;
+    float displayed=emoji_view()?gridOffset:scroll;
+    // Precision devices already provide a smooth stream; do not add a trailing animation.
+    bool reversing=scrollAnimating&&((scrollTarget-displayed)*delta>0);
+    float current=scrollAnimating&&!precision&&!reversing?scrollTarget:displayed;
+    scroll_to(current-float(delta)/WHEEL_DELTA*distance,!precision);
 }

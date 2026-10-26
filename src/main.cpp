@@ -14,6 +14,7 @@
 #include "history_retention.hpp"
 #include "pending_save.hpp"
 #include "smooth_scroll.hpp"
+#include "text_layout_cache.hpp"
 #include "instance_identity.hpp"
 #include "version.h"
 #include <uxtheme.h>
@@ -64,10 +65,11 @@ struct App {
     BrandIcons brandIcons;
     UINT dpi=96;float scale=1;HFONT inputFont=nullptr,settingsFont=nullptr;HBRUSH editBrush=nullptr;bool light=system_uses_light_theme();
     Com<ID2D1Factory> factory;NativeSurface surface;Lucide lucide;Com<ID2D1RenderTarget> target;Com<ID2D1SolidColorBrush> brush;Com<IDWriteFactory> textFactory;
-    Com<IDWriteTextFormat> body,small,heading,icon,previewText;Com<ID2D1Bitmap> cameraBitmap;
+    Com<IDWriteTextFormat> body,small,heading,icon,previewText;Com<ID2D1Bitmap> cameraBitmap,clipboardBitmap;uint64_t clipboardBitmapIdentity=0;TextLayoutCache textLayouts;
+    std::vector<float> listPositions;float listHeight=0;
     struct IconBitmap {Com<ID2D1Bitmap> bitmap;uint64_t used=0;};
     AppIcons appIcons;std::map<std::wstring,IconBitmap> iconBitmaps;uint64_t iconClock=0;
-    Mode mode=Mode::Home,resultMode=Mode::Home;std::vector<Row> rows;std::vector<AppEntry> apps;int selected=0,hover=-1;float scroll=0,scrollTarget=0;ULONGLONG scrollTick=0;bool scrollAnimating=false;bool viewportScrolled=false,scrollbarDragging=false;float scrollbarGrab=0;std::wstring query,status=L"Ready when you are",toast,converterHint;
+    Mode mode=Mode::Home,resultMode=Mode::Home;std::vector<Row> rows;std::vector<AppEntry> apps;int selected=0,hover=-1;float scroll=0,scrollTarget=0;std::chrono::steady_clock::time_point scrollTick{};HANDLE scrollTimer=CreateWaitableTimerExW(nullptr,nullptr,0x2,TIMER_ALL_ACCESS);bool scrollAnimating=false;bool viewportScrolled=false,scrollbarDragging=false;float scrollbarGrab=0;std::wstring query,status=L"Ready when you are",toast,converterHint;
     bool queryPending=false,composing=false,positionSaved=false;POINT savedPosition{};SIZE savedSize{PALETTE_WIDTH,PALETTE_HEIGHT};
     std::wstring localCurrency=local_currency_code();
     int editLayoutWidth=0;UINT editLayoutDpi=0;
@@ -85,7 +87,7 @@ struct App {
     Camera camera;bool mirrored=true,cameraPending=false;int cameraDevice=0;uint64_t cameraSequence=0;int pasteAttempts=0;bool smoke=false,inspectWindow=false;int smokeStage=0;
     std::chrono::steady_clock::time_point launchTime=std::chrono::steady_clock::now();double readyMs=0;
     App(HINSTANCE h,const std::filesystem::path& overrideDir):instance(h),brandIcons(h),dir(overrideDir.empty()?data_dir():overrideDir){isolatedData=!overrideDir.empty();std::error_code ec;std::filesystem::create_directories(dir,ec);editBrush=CreateSolidBrush(palette_background(light));}
-    ~App(){exiting=true;SetEvent(quitEvent);camera.stop();if(indexWorker.joinable())indexWorker.join();if(clipWorker.joinable())clipWorker.join();if(rateWorker.joinable())rateWorker.join();CloseHandle(quitEvent);CloseHandle(captureEvent);CloseHandle(saveEvent);if(inputFont)DeleteObject(inputFont);if(settingsFont)DeleteObject(settingsFont);DeleteObject(editBrush);}
+    ~App(){if(scrollTimer)CloseHandle(scrollTimer);exiting=true;SetEvent(quitEvent);camera.stop();if(indexWorker.joinable())indexWorker.join();if(clipWorker.joinable())clipWorker.join();if(rateWorker.joinable())rateWorker.join();CloseHandle(quitEvent);CloseHandle(captureEvent);CloseHandle(saveEvent);if(inputFont)DeleteObject(inputFont);if(settingsFont)DeleteObject(settingsFont);DeleteObject(editBrush);}
     void invalidate(){if(hwnd)InvalidateRect(hwnd,nullptr,FALSE);}
     void notify(std::wstring s){toast=std::move(s);SetTimer(hwnd,TIMER_TOAST,4000,nullptr);invalidate();}
     HWND control(HWND parent,const wchar_t* cls,const wchar_t* text,DWORD style,int x,int y,int w,int h,int id){auto c=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|style,x,y,w,h,parent,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance,nullptr);SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(settingsFont),TRUE);return c;}
@@ -250,7 +252,9 @@ struct App {
         if(rateWorker.joinable())rateWorker.join();rateBusy=true;rateError.clear();
         rateWorker=std::thread([this]{auto* snapshot=new RateSnapshot(fetch_daily_rates());if(exiting||!PostMessageW(hwnd,MSG_RATE,0,reinterpret_cast<LPARAM>(snapshot)))delete snapshot;});
     }
-    void text(const std::wstring& s,float x,float y,float w,float h,IDWriteTextFormat* font,D2D1_COLOR_F color){brush->SetColor(color);target->DrawText(s.c_str(),static_cast<UINT32>(s.size()),font,D2D1::RectF(x,y,x+w,y+h),brush.p,D2D1_DRAW_TEXT_OPTIONS_CLIP|D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);}
+    void text(const std::wstring& s,float x,float y,float w,float h,IDWriteTextFormat* font,D2D1_COLOR_F color){
+        if(auto layout=textLayouts.get(textFactory.p,font,s,w,h)){brush->SetColor(color);target->DrawTextLayout(D2D1::Point2F(x,y),layout,brush.p,D2D1_DRAW_TEXT_OPTIONS_CLIP|D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);}
+    }
     static D2D1_COLOR_F color(int r,int g,int b,float a=1){return D2D1::ColorF(r/255.f,g/255.f,b/255.f,a);}
     void rect(float x,float y,float w,float h,D2D1_COLOR_F c,float radius=0){brush->SetColor(c);if(radius)target->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x,y,x+w,y+h),radius,radius),brush.p);else target->FillRectangle(D2D1::RectF(x,y,x+w,y+h),brush.p);}
     bool init_graphics(){
@@ -268,7 +272,7 @@ struct App {
         return bool(brush)&&bool(body)&&bool(small)&&bool(heading)&&bool(icon);
     }
     void draw_icon(const std::string& name,float x,float y,float size,D2D1_COLOR_F tint){brush->SetColor(tint);lucide.draw(factory.p,target.p,brush.p,name,x,y,size);}
-    void release_graphics(){iconBitmaps.clear();cameraBitmap.reset();brush.reset();target.reset();surface.reset();cameraSequence=0;}
+    void release_graphics(){clipboardBitmap.reset();clipboardBitmapIdentity=0;iconBitmaps.clear();cameraBitmap.reset();brush.reset();target.reset();surface.reset();cameraSequence=0;}
     bool draw_app_icon(const std::wstring& key,float x,float y){
         auto found=iconBitmaps.find(key);
         if(found==iconBitmaps.end()){
@@ -557,11 +561,24 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR args,int){
     app->load_settings();app->setup_startup();app->load_usage();app->load_apps();app->apply_usage();app->load_rates();app->start_clipboard();AddClipboardFormatListener(app->hwnd);if(app->historyEnabled)SetEvent(app->captureEvent);WTSRegisterSessionNotification(app->hwnd,NOTIFY_FOR_THIS_SESSION);app->tray();app->hint();app->scan_apps();app->refresh_rates();app->rebuild();
     app->readyMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-app->launchTime).count();
     if(!background)app->show(Mode::Home,false);if(app->smoke)SetTimer(app->hwnd,TIMER_SMOKE,2000,nullptr);
-    MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){
-        // Record before dialog/system-key translation (especially Alt+Space).
-        if(app->settings_capture_message(msg))continue;
-        if(app->settings&&IsDialogMessageW(app->settings,&msg))continue;
-        TranslateMessage(&msg);DispatchMessageW(&msg);
+    bool running=true;
+    while(running){
+        MSG msg{};int processed=0;
+        // Service input before rendering, but bound a burst so animation cannot starve.
+        while(processed++<64&&PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){
+            if(msg.message==WM_QUIT){running=false;break;}
+            if(app->settings_capture_message(msg))continue;
+            if(app->settings&&IsDialogMessageW(app->settings,&msg))continue;
+            TranslateMessage(&msg);DispatchMessageW(&msg);
+        }
+        if(!running)break;
+        HANDLE frame=app->scrollAnimating?app->scrollTimer:nullptr;
+        DWORD ready=MsgWaitForMultipleObjectsEx(frame?1:0,frame?&frame:nullptr,INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
+        if(ready==WAIT_FAILED)break;
+        if(frame&&ready==WAIT_OBJECT_0){
+            app->animate_scroll();UpdateWindow(app->hwnd);
+            if(app->scrollAnimating)app->schedule_scroll_frame();
+        }
     }
     // Drain posted heap-owned results after workers are stopped in App destruction.
     application.reset();app=nullptr;CoUninitialize();return 0;
