@@ -27,18 +27,93 @@ void keycap(const std::wstring& label,float x,float y,float width) {
 bool emoji_view() const {return resultMode==Mode::Emoji;}
 bool clipboard_view() const {return resultMode==Mode::Clipboard;}
 float list_top() const {return conversionCard?261.f:float(ROW_TOP);}
-ListLayout visible_list(int first) const {
-    ListLayout result;float y=list_top();
-    const bool grouped=!conversionCard&&!rows.empty()&&(resultMode==Mode::Home||resultMode==Mode::Apps)&&!rows.front().group.empty();
-    for(int index=first;index<int(rows.size())&&result.count<VISIBLE_ROWS;++index) {
-        bool header=grouped&&(index==first||rows[index].group!=rows[index-1].group);
-        if(header&&index!=first)y+=26;
-        if(y+ROW_HEIGHT>FOOTER_TOP)break;
-        result.items[result.count++]={index,y,header};y+=ROW_HEIGHT;
-    }
-    return result;
+bool list_group_header(int index) const {
+    int first=conversionCard?1:0;
+    return !conversionCard&&!rows.empty()&&(resultMode==Mode::Home||resultMode==Mode::Apps)&&!rows.front().group.empty()&&
+        (index==first||rows[index].group!=rows[index-1].group);
 }
-int list_capacity() const {return std::max(1,visible_list(scroll).count);}
+float list_row_offset(int index) const {
+    float y=0;for(int i=conversionCard?1:0;i<=index&&i<int(rows.size());++i){
+        if(list_group_header(i))y+=26;
+        if(i==index)return y;y+=ROW_HEIGHT;
+    }return y;
+}
+float list_content_height() const {return int(rows.size())<=(conversionCard?1:0)?0.f:list_row_offset(int(rows.size())-1)+ROW_HEIGHT;}
+ListLayout visible_list(float offset) const {
+    ListLayout result;float y=list_top()-offset;
+    for(int index=conversionCard?1:0;index<int(rows.size());++index){
+        bool header=list_group_header(index);if(header)y+=26;
+        if(y-(header?26:0)>=FOOTER_TOP)break;
+        if(y+ROW_HEIGHT>list_top()&&result.count<int(result.items.size()))result.items[result.count++]={index,y,header};
+        y+=ROW_HEIGHT;
+    }return result;
+}
+int list_capacity() const {return std::max(1,int((FOOTER_TOP-list_top())/ROW_HEIGHT));}
+float maximum_list_scroll() const {return std::max(0.f,list_content_height()-(FOOTER_TOP-list_top()));}
+void stop_scroll_animation(){KillTimer(hwnd,TIMER_SCROLL);scrollAnimating=false;}
+void animate_scroll(){
+    ULONGLONG now=GetTickCount64();float elapsed=float(now-scrollTick);scrollTick=now;
+    float& offset=emoji_view()?gridOffset:scroll;
+    float maximum=emoji_view()?std::max(0.f,gridHeight-FOOTER_TOP):maximum_list_scroll();
+    scrollTarget=std::clamp(scrollTarget,0.f,maximum);
+    offset=smooth_scroll_step(offset,scrollTarget,elapsed);
+    if(offset==scrollTarget)stop_scroll_animation();
+    hover=-1;invalidate();
+}
+void scroll_to(float value,bool animate){
+    float maximum=emoji_view()?std::max(0.f,gridHeight-FOOTER_TOP):maximum_list_scroll();
+    scrollTarget=std::clamp(value,0.f,maximum);
+    viewportScrolled=true;hover=-1;
+    if(animate){if(!scrollAnimating){scrollTick=GetTickCount64();scrollAnimating=true;SetTimer(hwnd,TIMER_SCROLL,16,nullptr);}}
+    else {stop_scroll_animation();if(emoji_view())gridOffset=scrollTarget;else scroll=scrollTarget;}
+    invalidate();
+}
+struct ScrollbarGeometry {float x=0,top=0,height=0,thumbTop=0,thumbHeight=0,maximum=0,offset=0;};
+ScrollbarGeometry scrollbar_geometry() const {
+    ScrollbarGeometry bar;
+    if(mode==Mode::Camera)return bar;
+    bar.x=(clipboard_view()?283.f:750.f)-11;
+    bar.top=emoji_view()?71.f:list_top()+3;
+    bar.height=FOOTER_TOP-5-bar.top;
+    float fraction=1;
+    if(emoji_view()){
+        bar.maximum=std::max(0.f,gridHeight-FOOTER_TOP);bar.offset=gridOffset;
+        fraction=(FOOTER_TOP-66.f)/std::max(1.f,gridHeight-66);
+    }else{
+        bar.maximum=maximum_list_scroll();bar.offset=scroll;
+        fraction=(FOOTER_TOP-list_top())/std::max(1.f,list_content_height());
+    }
+    if(bar.maximum<=0)return bar;
+    bar.thumbHeight=std::clamp(bar.height*fraction,24.f,bar.height);
+    bar.thumbTop=bar.top+(bar.height-bar.thumbHeight)*std::clamp(bar.offset/bar.maximum,0.f,1.f);
+    return bar;
+}
+bool scrollbar_at(float x,float y) const {
+    auto bar=scrollbar_geometry();return !popup&&bar.maximum>0&&x>=bar.x-3&&x<bar.x+10&&y>=bar.top&&y<bar.top+bar.height;
+}
+void paint_scrollbar() {
+    auto bar=scrollbar_geometry();if(bar.maximum<=0)return;
+    rect(bar.x,bar.top,6,bar.height,light?color(0,0,0,.05f):color(255,255,255,.05f),3);
+    rect(bar.x,bar.thumbTop,6,bar.thumbHeight,light?color(0,0,0,scrollbarDragging?.48f:.30f):color(255,255,255,scrollbarDragging?.55f:.35f),3);
+}
+void set_scrollbar_offset(float value) {
+    scroll_to(value,false);
+}
+void drag_scrollbar(float y) {
+    auto bar=scrollbar_geometry();if(bar.maximum<=0||bar.height<=bar.thumbHeight)return;
+    set_scrollbar_offset((y-scrollbarGrab-bar.top)/(bar.height-bar.thumbHeight)*bar.maximum);
+}
+bool begin_scrollbar(float x,float y) {
+    if(!scrollbar_at(x,y))return false;
+    auto bar=scrollbar_geometry();
+    if(y>=bar.thumbTop&&y<bar.thumbTop+bar.thumbHeight){
+        stop_scroll_animation();scrollbarGrab=y-bar.thumbTop;scrollbarDragging=true;SetCapture(hwnd);invalidate();
+    }else{
+        float page=FOOTER_TOP-(emoji_view()?66.f:list_top());
+        scroll_to((scrollAnimating?scrollTarget:bar.offset)+(y<bar.thumbTop?-page:page),true);
+    }
+    return true;
+}
 void position_edit() {
     if(!edit)return;
     int width=(emoji_view()||clipboard_view())?474:640;
@@ -74,6 +149,7 @@ void build_grid() {
     gridHeight=y;gridOffset=std::clamp(gridOffset,0.f,std::max(0.f,gridHeight-FOOTER_TOP));
 }
 void ensure_selection_visible() {
+    viewportScrolled=false;stop_scroll_animation();
     selected=std::clamp(selected,0,std::max(0,int(rows.size())-1));
     if(emoji_view()) {
         if(selected<int(grid.size())) {
@@ -83,10 +159,12 @@ void ensure_selection_visible() {
         }
         gridOffset=std::clamp(gridOffset,0.f,std::max(0.f,gridHeight-FOOTER_TOP));return;
     }
-    int first=conversionCard?1:0;
-    scroll=std::clamp(scroll,first,std::max(first,int(rows.size())-1));
-    if(selected<scroll&&selected>=first)scroll=selected;
-    while(selected>=first&&scroll<selected){auto visible=visible_list(scroll);if(visible.count&&selected<=visible.items[visible.count-1].row)break;++scroll;}
+    if(selected>=(conversionCard?1:0)&&selected<int(rows.size())){
+        float y=list_row_offset(selected),height=FOOTER_TOP-list_top();
+        if(y<scroll)scroll=y;
+        if(y+ROW_HEIGHT>scroll+height)scroll=y+ROW_HEIGHT-height;
+    }
+    scroll=std::clamp(scroll,0.f,maximum_list_scroll());
 }
 int row_at(float x,float y) const {
     if(y<65||y>=FOOTER_TOP)return -1;
@@ -106,9 +184,9 @@ void paint_header() {
     if(emoji_view()||clipboard_view()) {
         outline(537,16,198,34,rule(),7);
         draw_icon(emoji_view()?"smile":"clipboard",550,25,16,ink());
-        std::wstring filter=emoji_view()?(emojiCategory<0?L"All Categories":std::wstring(emoji_category_name(EmojiCategory(emojiCategory)))):L"Text";
+        std::wstring filter=emoji_view()?(emojiCategory<0?L"All Categories":std::wstring(emoji_category_name(EmojiCategory(emojiCategory)))):(clipboardFilter==1?L"Text":clipboardFilter==2?L"Images":L"All Types");
         text(filter,574,23,139,24,body.p,ink());
-        if(emoji_view()) {brush->SetColor(muted());target->DrawLine(D2D1::Point2F(715,31),D2D1::Point2F(718,34),brush.p);target->DrawLine(D2D1::Point2F(718,34),D2D1::Point2F(721,31),brush.p);}
+        {brush->SetColor(muted());target->DrawLine(D2D1::Point2F(715,31),D2D1::Point2F(718,34),brush.p);target->DrawLine(D2D1::Point2F(718,34),D2D1::Point2F(721,31),brush.p);}
     } else draw_icon("settings-2",709,25,17,muted());
     paint_search_input(edit,target.p,placeholder().c_str());
     rect(1,65,748,1,rule());
@@ -137,12 +215,13 @@ std::wstring row_shortcut(const Row& row) const {
 }
 void paint_list() {
     bool clip=clipboard_view();float width=clip?283.f:750.f;
+    if(scrollbar_geometry().maximum>0)width-=12;
     auto visible=visible_list(scroll);
-    if(!conversionCard&&(!visible.count||!visible.items[0].header))text(clip?L"Clipboard History":query.empty()?L"Suggestions":L"Results",15,76,width-30,20,small.p,muted());
+    if(!conversionCard&&!(!rows.empty()&&list_group_header(0)))text(clip?L"Clipboard History":query.empty()?L"Suggestions":L"Results",15,76,width-30,20,small.p,muted());
     std::vector<std::wstring> visibleApps;
     for(int n=0;n<visible.count;++n){auto& row=rows[visible.items[n].row];if(row.action==Action::App)visibleApps.push_back(row.value);}
     appIcons.request(hwnd,MSG_ICONS,visibleApps);
-    target->PushAxisAlignedClip(D2D1::RectF(1,66,width,FOOTER_TOP),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    target->PushAxisAlignedClip(D2D1::RectF(1,list_top(),width,FOOTER_TOP),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     for(int n=0;n<visible.count;++n) {
         auto position=visible.items[n];int index=position.row;auto& row=rows[index];float y=position.y;
         if(position.header)text(row.group,15,y-18,width-30,20,small.p,muted());
@@ -154,6 +233,7 @@ void paint_list() {
         if(!shortcut.empty())aligned(shortcut,width-180,y+10,165,22,small.p,muted(),DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
     target->PopAxisAlignedClip();
+    paint_scrollbar();
 }
 void paint_emoji() {
     target->PushAxisAlignedClip(D2D1::RectF(1,66,749,FOOTER_TOP),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -171,11 +251,7 @@ void paint_emoji() {
         icon->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     }
     target->PopAxisAlignedClip();
-    if(gridHeight>FOOTER_TOP) {
-        float viewport=FOOTER_TOP-66,track=viewport-10,thumb=std::max(24.f,track*viewport/(gridHeight-66));
-        float y=71+(track-thumb)*gridOffset/(gridHeight-FOOTER_TOP);
-        rect(745,y,3,thumb,light?color(0,0,0,.19f):color(255,255,255,.22f),2);
-    }
+    paint_scrollbar();
 }
 const HistoryItem* selected_history() const {
     if(selected<0||selected>=int(rows.size())||!rows[selected].identity)return nullptr;
@@ -190,13 +266,28 @@ std::wstring copied_time(uint64_t timestamp) {
 void paint_clipboard() {
     paint_list();rect(283,66,1,FOOTER_TOP-66,rule());
     auto item=selected_history();
-    if(!item){aligned(historyEnabled?std::wstring(history.empty()?L"Copy text to add it here":L"No matches"):L"Text only · Encrypted on this PC · "+std::to_wstring(historyRetentionDays)+L" days",302,208,430,80,body.p,muted(),DWRITE_TEXT_ALIGNMENT_CENTER);return;}
+    if(!item){aligned(historyEnabled?std::wstring(history.empty()?L"Copy text or an image to add it here":L"No matches"):L"Text and images · Encrypted on this PC · "+std::to_wstring(historyRetentionDays)+L" days",302,208,430,80,body.p,muted(),DWRITE_TEXT_ALIGNMENT_CENTER);return;}
     rect(300,82,433,208,tile_fill(),10);
-    text(item->text.substr(0,12000),313,94,407,184,previewText.p,ink());
-    text(L"Information",300,308,420,22,small.p,muted());
-    auto metadata=[&](const std::wstring& key,const std::wstring& value,float y){text(key,300,y,125,23,small.p,muted());aligned(value,423,y,310,23,small.p,ink(),DWRITE_TEXT_ALIGNMENT_TRAILING);rect(300,y+28,433,1,rule());};
-    metadata(L"Type",L"Text",339);metadata(L"Characters",std::to_wstring(item->text.size()),373);
-    metadata(L"Copied",copied_time(item->timestamp),407);
+    if(item->dib.empty())text(item->text.substr(0,12000),313,94,407,184,previewText.p,ink());
+    else {
+        BITMAPINFOHEADER h{};memcpy(&h,item->dib.data(),sizeof(h));
+        Com<ID2D1Bitmap> bitmap;auto properties=D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_IGNORE));
+        target->CreateBitmap(D2D1::SizeU(h.biWidth,-h.biHeight),item->dib.data()+40,h.biWidth*4,properties,bitmap.put());
+        float fit=std::min(407.f/h.biWidth,184.f/-h.biHeight),w=h.biWidth*fit,hh=-h.biHeight*fit;
+        if(bitmap)target->DrawBitmap(bitmap.p,D2D1::RectF(313+(407-w)/2,94+(184-hh)/2,313+(407+w)/2,94+(184+hh)/2));
+    }
+    text(L"Information",300,294,420,22,small.p,muted());
+    auto metadata=[&](const std::wstring& key,const std::wstring& value,float y){text(key,300,y,125,23,small.p,muted());aligned(value,423,y,310,23,small.p,ink(),DWRITE_TEXT_ALIGNMENT_TRAILING);rect(300,y+25,433,1,rule());};
+    metadata(L"Type",item->dib.empty()?L"Text":L"Image",322);
+    if(item->dib.empty())metadata(L"Characters",std::to_wstring(item->text.size()),350);
+    else {BITMAPINFOHEADER h{};memcpy(&h,item->dib.data(),sizeof(h));metadata(L"Dimensions",std::to_wstring(h.biWidth)+L" × "+std::to_wstring(-h.biHeight),350);}
+    const size_t bytes=item->dib.empty()?item->text.size()*sizeof(wchar_t):item->dib.size();
+    wchar_t sizeLabel[64]{};
+    if(bytes>=1024*1024)swprintf(sizeLabel,64,L"%.2f MiB",double(bytes)/(1024*1024));
+    else if(bytes>=1024)swprintf(sizeLabel,64,L"%.1f KiB",double(bytes)/1024);
+    else swprintf(sizeLabel,64,L"%llu bytes",static_cast<unsigned long long>(bytes));
+    metadata(L"Stored size",sizeLabel,378);
+    metadata(L"Copied",copied_time(item->timestamp),406);
 }
 std::pair<std::wstring,std::wstring> currency_label(const std::wstring& code) {
     const std::pair<const wchar_t*,const wchar_t*> names[]={{L"USD",L"US Dollar"},{L"IDR",L"Indonesian Rupiah"},{L"JPY",L"Japanese Yen"},{L"EUR",L"Euro"},{L"GBP",L"British Pound"},{L"SGD",L"Singapore Dollar"},{L"AUD",L"Australian Dollar"},{L"CAD",L"Canadian Dollar"},{L"KRW",L"South Korean Won"},{L"INR",L"Indian Rupee"},{L"MYR",L"Malaysian Ringgit"},{L"THB",L"Thai Baht"}};

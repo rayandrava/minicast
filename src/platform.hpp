@@ -32,7 +32,7 @@ std::vector<AppEntry> discover_apps(const std::atomic<bool>& exiting);
 bool launch_app(HWND hwnd,const AppEntry& app);
 bool copy_text(HWND hwnd,const std::wstring& text);
 bool paste_to(HWND target);
-struct HistoryItem { std::wstring text; uint64_t timestamp=0; };
+struct HistoryItem { std::wstring text; uint64_t timestamp=0; std::vector<unsigned char> dib; };
 std::vector<HistoryItem> load_history(const std::filesystem::path& path,int retentionDays=7,bool* pruned=nullptr);
 bool save_history(const std::filesystem::path& path,const std::vector<HistoryItem>& items);
 struct Rate { std::wstring from,to,value,date,error; };

@@ -4,6 +4,12 @@ Review target: `0.1.0-alpha.1`, Windows 11 x64, 2026-10-23. This is an alpha wit
 
 The local packaging pass completed with **422 assertions and zero failures** across nine console test programs. The x64 GUI executable is **1,122,304 bytes**. Its version metadata and all 27 embedded icon images passed verification. Missing profile paths and unsupported command-line flags were also checked to exit before opening a window or using the normal profile. The public-file scan found no credential patterns, private home paths or runtime profile files; all 26 relative Markdown links resolved. These are scoped checks, not a security certification or a complete desktop test.
 
+## Clipboard and scrolling update (2026-10-26)
+
+The local build passed **485 assertions with zero failures** across eleven console test programs. Added checks cover PNG-only clipboard capture and image copy/recapture on a private Windows window station, encrypted mixed text/image storage, malformed images, and frame-rate-independent scrolling with fractional offsets and no overshoot. The test station has its own clipboard and does not overwrite the user's clipboard.
+
+Lists now render partially visible rows using pixel offsets. Wheel and track-click animations stop their timer on completion; scrollbar dragging updates the offset directly. Clipboard filters, dimensions, stored size and dropdown styling are included. The executable and embedded icons passed build verification. These latest UI changes have not been live-tested; manual interaction and visual checks remain outstanding.
+
 ## Automated package gates
 
 `scripts/package-release.ps1` runs all of these before producing a ZIP. A failed check stops packaging; a successfully generated package has completed the gates. Console output supplies the assertion counts and any compiler warnings.
@@ -22,7 +28,7 @@ The local packaging pass completed with **422 assertions and zero failures** acr
 | Binary | Windows GUI subsystem, x64 architecture, embedded version and three icon groups with 27 images |
 | Package | Pinned compiler archive/extracted-file integrity, explicit payload allowlist and SHA-256 manifests |
 
-The console tests do not read the system clipboard, open a camera, change startup registration or register global hotkeys. Storage/image fixtures live under the ignored build directory. The compiler emits warnings for Windows dynamic-function pointer casts in the RichEdit/UI Automation loader; the release build does not treat these as errors.
+The console tests do not read the user's clipboard, open a camera, change startup registration or register global hotkeys. Storage/image fixtures live under the ignored build directory. The compiler emits warnings for Windows dynamic-function pointer casts in the RichEdit/UI Automation loader; the release build does not treat these as errors.
 
 ## Completed review observations
 
@@ -84,4 +90,4 @@ Do not reuse earlier memory or launch-time measurements as current release bench
 
 ## Known alpha limits
 
-Clipboard history is text-only; the emoji catalog is curated rather than complete CLDR coverage. Custom-rendered results do not yet expose full screen-reader semantics. The current update command opens a release page and does not compare versions, download or install. Binaries are unsigned. These limitations should remain visible in release notes.
+Clipboard history supports text, PNG and Windows 24/32-bit bitmap images (up to 64 MiB decoded each); the emoji catalog is curated rather than complete CLDR coverage. Custom-rendered results do not yet expose full screen-reader semantics. The current update command opens a release page and does not compare versions, download or install. Binaries are unsigned. These limitations should remain visible in release notes.

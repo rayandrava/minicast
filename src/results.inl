@@ -164,14 +164,15 @@ void rebuild(bool preserveSelection = true) {
     if (resultMode == Mode::Clipboard) {
         if(historyLoaded)expire_history();
         if (!historyEnabled) {
-            rows.push_back({L"Enable Clipboard History", L"Text only · "+std::to_wstring(historyRetentionDays)+L" days", L"clipboard", Action::EnableHistory});
+            rows.push_back({L"Enable Clipboard History", L"Text and images · "+std::to_wstring(historyRetentionDays)+L" days", L"clipboard", Action::EnableHistory});
         } else {
             int i = 0;
             for (auto& item : history) {
-                if (contains_folded(item.text, normalizedQuery)) {
+                if ((clipboardFilter!=1||item.dib.empty()) && (clipboardFilter!=2||!item.dib.empty()) && contains_folded(item.text, normalizedQuery)) {
                     // Only the visible excerpt belongs to a result; copy the
                     // complete entry once, on activation, from the history store.
                     auto title = item.text.substr(0, 160);
+                    if(!item.dib.empty()){BITMAPINFOHEADER h{};memcpy(&h,item.dib.data(),sizeof(h));title=L"Image · "+std::to_wstring(h.biWidth)+L" × "+std::to_wstring(-h.biHeight);}
                     std::replace(title.begin(), title.end(), L'\n', L' ');
                     std::replace(title.begin(), title.end(), L'\r', L' ');
                     std::replace(title.begin(), title.end(), L'\t', L' ');
@@ -195,7 +196,11 @@ void rebuild(bool preserveSelection = true) {
         selected = found == rows.end() ? 0 : int(found - rows.begin());
     }
     selected = std::clamp(selected, 0, std::max(0, int(rows.size()) - 1));
-    build_grid();ensure_selection_visible();position_edit();
+    build_grid();
+    if(preserveSelection&&viewportScrolled){
+        scroll=std::clamp(scroll,0.f,maximum_list_scroll());
+    }else ensure_selection_visible();
+    position_edit();
     hover = -1;
     if (resultMode == Mode::Clipboard) status = historyEnabled ? std::to_wstring(history.size()) + L" items" : L"History is off";
     else if (rateBusy) status = L"Updating rates…";

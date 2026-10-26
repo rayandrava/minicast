@@ -1,5 +1,6 @@
 #include "platform.hpp"
 #include "camera.hpp"
+#include "clipboard_image.hpp"
 #include "lucide.hpp"
 #include "surface.hpp"
 #include "app_icons.hpp"
@@ -12,6 +13,7 @@
 #include "shortcut_capture.hpp"
 #include "history_retention.hpp"
 #include "pending_save.hpp"
+#include "smooth_scroll.hpp"
 #include "instance_identity.hpp"
 #include "version.h"
 #include <uxtheme.h>
@@ -36,7 +38,7 @@
 using namespace mini;
 namespace {
 constexpr UINT MSG_TRAY=WM_APP+1,MSG_APPS=WM_APP+2,MSG_CLIP=WM_APP+3,MSG_RATE=WM_APP+4,MSG_CAMERA=WM_APP+5,MSG_SHOW=WM_APP+6,MSG_STATUS=WM_APP+7,MSG_QUERY=WM_APP+8,MSG_ICONS=WM_APP+9;
-constexpr int ID_QUERY=100,TIMER_PASTE=2,TIMER_TOAST=3,TIMER_SMOKE=4,TIMER_TRIM_GRAPHICS=5,TIMER_HISTORY_EXPIRY=6;
+constexpr int ID_QUERY=100,TIMER_PASTE=2,TIMER_TOAST=3,TIMER_SMOKE=4,TIMER_TRIM_GRAPHICS=5,TIMER_HISTORY_EXPIRY=6,TIMER_SCROLL=7;
 constexpr int PALETTE_WIDTH=750,PALETTE_HEIGHT=475,ROW_TOP=92,ROW_HEIGHT=38,VISIBLE_ROWS=9,FOOTER_TOP=434;
 constexpr int SETTINGS_COMMAND=201,SETTINGS_HOTKEY=202,SETTINGS_REMOVE=205,SETTINGS_HISTORY=206,SETTINGS_CLEAR=207,SETTINGS_REFRESH=208;
 enum class Mode { Home,Apps,Convert,Emoji,Clipboard,Camera };
@@ -46,8 +48,8 @@ struct GridTile {int row;D2D1_RECT_F bounds;};
 struct GridSection {std::wstring name;int count;float y;};
 struct PaletteAction {std::wstring name,shortcut;int command;};
 struct ListPosition {int row;float y;bool header;};
-struct ListLayout {std::array<ListPosition,VISIBLE_ROWS> items{};int count=0;};
-struct CapturedText {DWORD sequence;uint64_t generation;std::wstring text;};
+struct ListLayout {std::array<ListPosition,VISIBLE_ROWS+3> items{};int count=0;};
+struct CapturedClipboard {DWORD sequence;uint64_t generation;std::wstring text;std::vector<unsigned char> dib;};
 const std::pair<const wchar_t*,const wchar_t*> commands[]={
     {L"launcher.open",L"Open launcher"},{L"apps.open",L"Search apps"},{L"converter.units",L"Unit converter"},
     {L"converter.currency",L"Currency converter"},{L"converter.time",L"Time converter"},{L"emoji.open",L"Emoji picker"},
@@ -65,11 +67,11 @@ struct App {
     Com<IDWriteTextFormat> body,small,heading,icon,previewText;Com<ID2D1Bitmap> cameraBitmap;
     struct IconBitmap {Com<ID2D1Bitmap> bitmap;uint64_t used=0;};
     AppIcons appIcons;std::map<std::wstring,IconBitmap> iconBitmaps;uint64_t iconClock=0;
-    Mode mode=Mode::Home,resultMode=Mode::Home;std::vector<Row> rows;std::vector<AppEntry> apps;int selected=0,scroll=0,hover=-1;std::wstring query,status=L"Ready when you are",toast,converterHint;
+    Mode mode=Mode::Home,resultMode=Mode::Home;std::vector<Row> rows;std::vector<AppEntry> apps;int selected=0,hover=-1;float scroll=0,scrollTarget=0;ULONGLONG scrollTick=0;bool scrollAnimating=false;bool viewportScrolled=false,scrollbarDragging=false;float scrollbarGrab=0;std::wstring query,status=L"Ready when you are",toast,converterHint;
     bool queryPending=false,composing=false,positionSaved=false;POINT savedPosition{};SIZE savedSize{PALETTE_WIDTH,PALETTE_HEIGHT};
     std::wstring localCurrency=local_currency_code();
     int editLayoutWidth=0;UINT editLayoutDpi=0;
-    std::vector<GridTile> grid;std::vector<GridSection> gridSections;float gridOffset=0,gridHeight=0;int emojiCategory=-1;
+    std::vector<GridTile> grid;std::vector<GridSection> gridSections;float gridOffset=0,gridHeight=0;int emojiCategory=-1;int clipboardFilter=0;
     bool conversionCard=false;int popup=0,popupSelected=0;std::vector<PaletteAction> popupActions;
     std::vector<Binding> bindings;std::map<int,std::wstring> hotkeys;int nextHotkey=1;std::vector<std::pair<std::wstring,std::wstring>> settingsCommands;
     ShortcutChord registeredLauncher{};
@@ -80,7 +82,7 @@ struct App {
     uint64_t historyNoticeRevision=0;std::wstring historyNoticeSuccess,historyNoticeFailure;
     std::map<std::wstring,int> appUsage;PendingSave<std::vector<unsigned char>> usageSave;
     std::filesystem::path dir;std::map<std::wstring,Rate> rates;std::wstring rateFetchedOn,rateError;bool rateBusy=false,indexing=false;
-    Camera camera;bool mirrored=true,cameraPending=false;int cameraDevice=0;uint64_t cameraSequence=0;int pasteAttempts=0;bool smoke=false;int smokeStage=0;
+    Camera camera;bool mirrored=true,cameraPending=false;int cameraDevice=0;uint64_t cameraSequence=0;int pasteAttempts=0;bool smoke=false,inspectWindow=false;int smokeStage=0;
     std::chrono::steady_clock::time_point launchTime=std::chrono::steady_clock::now();double readyMs=0;
     App(HINSTANCE h,const std::filesystem::path& overrideDir):instance(h),brandIcons(h),dir(overrideDir.empty()?data_dir():overrideDir){isolatedData=!overrideDir.empty();std::error_code ec;std::filesystem::create_directories(dir,ec);editBrush=CreateSolidBrush(palette_background(light));}
     ~App(){exiting=true;SetEvent(quitEvent);camera.stop();if(indexWorker.joinable())indexWorker.join();if(clipWorker.joinable())clipWorker.join();if(rateWorker.joinable())rateWorker.join();CloseHandle(quitEvent);CloseHandle(captureEvent);CloseHandle(saveEvent);if(inputFont)DeleteObject(inputFont);if(settingsFont)DeleteObject(settingsFont);DeleteObject(editBrush);}
@@ -210,6 +212,7 @@ struct App {
         historyEnabled=enabled;historyGeneration++;
         if(enabled&&!historyLoaded){bool pruned=false;history=load_history(dir/L"clipboard.bin",historyRetentionDays,&pruned);historyLoaded=true;if(pruned)queue_history();}
         if(historyLoaded)expire_history();
+        if(enabled)SetEvent(captureEvent);
         rebuild();settings_sync_options();return true;
     }
     void start_clipboard(){
@@ -226,8 +229,10 @@ struct App {
                 auto allowedFormat=RegisterClipboardFormatW(L"CanIncludeInClipboardHistory");if(IsClipboardFormatAvailable(allowedFormat)){auto handle=GetClipboardData(allowedFormat);if(handle&&GlobalSize(handle)>=sizeof(DWORD)){auto flag=static_cast<DWORD*>(GlobalLock(handle));if(flag){excluded|=*flag==0;GlobalUnlock(handle);}}}
                 std::wstring text;
                 if(!excluded&&IsClipboardFormatAvailable(CF_UNICODETEXT)){auto data=GetClipboardData(CF_UNICODETEXT);SIZE_T bytes=data?GlobalSize(data):0;if(bytes>0&&bytes<=history_max_item_bytes){auto p=static_cast<const wchar_t*>(GlobalLock(data));if(p){size_t max=bytes/sizeof(wchar_t),length=0;while(length<max&&p[length])length++;if(length<max)text.assign(p,length);GlobalUnlock(data);}}}
+                auto dib=excluded?std::vector<unsigned char>{}:capture_clipboard_image();
+                if(!dib.empty())text=L"Image";
                 DWORD sequence=GetClipboardSequenceNumber();CloseClipboard();
-                if(!text.empty()&&historyEnabled){auto* item=new CapturedText{sequence,generation,std::move(text)};if(!PostMessageW(hwnd,MSG_CLIP,0,reinterpret_cast<LPARAM>(item)))delete item;}
+                if(!text.empty()&&historyEnabled){auto* item=new CapturedClipboard{sequence,generation,std::move(text),std::move(dib)};if(!PostMessageW(hwnd,MSG_CLIP,0,reinterpret_cast<LPARAM>(item)))delete item;}
             }
             flush_storage();
         });
@@ -334,7 +339,7 @@ struct App {
         // Also covers the opaque HWND fallback, whose hidden draw may be clipped.
         RedrawWindow(hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN);
     }
-    void hide(bool restoreFocus=true){popup=0;appIcons.cancel_pending();cameraPending=false;camera.stop();cameraBitmap.reset();cameraSequence=0;if(!IsWindowVisible(hwnd))return;ShowWindow(hwnd,SW_HIDE);SetTimer(hwnd,TIMER_TRIM_GRAPHICS,60000,nullptr);if(restoreFocus&&previous&&IsWindow(previous))SetForegroundWindow(previous);}
+    void hide(bool restoreFocus=true){stop_scroll_animation();if(scrollbarDragging){scrollbarDragging=false;ReleaseCapture();}popup=0;appIcons.cancel_pending();cameraPending=false;camera.stop();cameraBitmap.reset();cameraSequence=0;if(!IsWindowVisible(hwnd))return;ShowWindow(hwnd,SW_HIDE);SetTimer(hwnd,TIMER_TRIM_GRAPHICS,60000,nullptr);if(restoreFocus&&previous&&IsWindow(previous))SetForegroundWindow(previous);}
     void update_query(){
         int length=GetWindowTextLengthW(edit);std::wstring latest(length+1,L'\0');
         GetWindowTextW(edit,latest.data(),length+1);latest.resize(length);
@@ -358,16 +363,17 @@ struct App {
             case Action::EnableHistory:enable_history(true);break;
             case Action::ClearHistory:clear_history();break;
             case Action::App:if(row.index>=0&&row.index<int(apps.size())){auto item=apps[row.index];hide();if(launch_app(hwnd,item))record_launch(item.target);else{show(Mode::Apps,false);notify(L"Couldn't open app. Try Refresh Apps.");}}break;
-            case Action::Copy:
+            case Action::Copy:{
+                const HistoryItem* imageEntry=nullptr;
                 if(resultMode==Mode::Clipboard && row.identity){
                     auto entry=std::find_if(history.begin(),history.end(),[&](const auto& item){return item.timestamp==row.identity;});
                     if(entry==history.end())return;
-                    row.value=entry->text;
+                    row.value=entry->text;if(!entry->dib.empty())imageEntry=&*entry;
                 }
                 if(row.value.empty()){if(mode==Mode::Convert&&query.empty()){SetWindowTextW(edit,row.title.c_str());update_query();}return;}
-                if(!copy_text(hwnd,row.value)){notify(L"Clipboard is busy. Try again.");return;}ownSequence=GetClipboardSequenceNumber();
+                if(!(imageEntry?copy_clipboard_image(hwnd,imageEntry->dib):copy_text(hwnd,row.value))){notify(L"Clipboard is busy. Try again.");return;}ownSequence=GetClipboardSequenceNumber();
                 if(resultMode==Mode::Emoji)record_emoji(row.value);
-                if((resultMode==Mode::Emoji||resultMode==Mode::Clipboard)&&!copyOnly){pasteTarget=previous;hide();pasteAttempts=0;SetTimer(hwnd,TIMER_PASTE,25,nullptr);}else notify(L"Copied");break;
+                if((resultMode==Mode::Emoji||resultMode==Mode::Clipboard)&&!copyOnly){pasteTarget=previous;hide();pasteAttempts=0;SetTimer(hwnd,TIMER_PASTE,25,nullptr);}else notify(L"Copied");break;}
         }
     }
     void open_releases(){
@@ -384,10 +390,10 @@ struct App {
         converterHint=id==L"converter.currency"?L"100 usd to idr":id==L"converter.time"?L"time Jakarta · 9am Jakarta to London tomorrow":L"25 c to f · 5 ft 10 in to cm · 2 gb to mib";show(next);
     }
     void clear_history(){history.clear();historyLoaded=true;historyGeneration++;queue_history(L"History cleared.",L"Couldn't clear saved history. Try Clear again.");schedule_history_expiry();rebuild();notify(L"Clearing history…");}
-    void accept_clip(DWORD sequence,std::wstring text){
+    void accept_clip(DWORD sequence,std::wstring text,std::vector<unsigned char> dib){
         if(!historyEnabled||sequence==ownSequence||sequence==lastSequence)return;lastSequence=sequence;
-        history.erase(std::remove_if(history.begin(),history.end(),[&](auto& h){return h.text==text;}),history.end());uint64_t now=history_now();
-        history.insert(history.begin(),{std::move(text),now});prune_history(history,now,historyRetentionDays);queue_history();schedule_history_expiry();if(resultMode==Mode::Clipboard)rebuild();
+        history.erase(std::remove_if(history.begin(),history.end(),[&](auto& h){return h.text==text&&h.dib==dib;}),history.end());uint64_t now=history_now();
+        history.insert(history.begin(),{std::move(text),now,std::move(dib)});prune_history(history,now,historyRetentionDays);queue_history();schedule_history_expiry();if(resultMode==Mode::Clipboard)rebuild();
     }
     void snapshot(bool copy){auto frame=camera.frame(mirrored);if(frame.pixels.empty()){notify(L"Wait for the camera's first frame.");return;}if(copy){if(copy_frame(hwnd,frame)){ownSequence=GetClipboardSequenceNumber();notify(L"Snapshot copied");}else notify(L"Could not copy snapshot");return;}
         Com<IFileSaveDialog> dialog;if(FAILED(CoCreateInstance(CLSID_FileSaveDialog,nullptr,CLSCTX_INPROC_SERVER,IID_IFileSaveDialog,reinterpret_cast<void**>(dialog.put())))){notify(L"Cannot open Save dialog");return;}COMDLG_FILTERSPEC types[]={{L"PNG image",L"*.png"}};dialog->SetFileTypes(1,types);dialog->SetDefaultExtension(L"png");dialog->SetFileName(L"Minicast snapshot.png");if(SUCCEEDED(dialog->Show(hwnd))){Com<IShellItem> item;if(SUCCEEDED(dialog->GetResult(item.put()))){PWSTR path=nullptr;if(SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH,&path))){bool ok=save_png(path,frame);CoTaskMemFree(path);notify(ok?L"Snapshot saved":L"Could not save snapshot");}}}}
@@ -469,6 +475,7 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         case MSG_QUERY:app->queryPending=false;app->update_query();return 0;
         case MSG_ICONS:if(IsWindowVisible(hwnd))app->invalidate();return 0;
         case WM_TIMER:
+            if(wp==TIMER_SCROLL){app->animate_scroll();return 0;}
             if(wp==TIMER_HISTORY_EXPIRY){if(app->expire_history()&&app->resultMode==Mode::Clipboard)app->rebuild();}
             if(wp==TIMER_TOAST){KillTimer(hwnd,TIMER_TOAST);app->toast.clear();app->invalidate();}
             if(wp==TIMER_TRIM_GRAPHICS){KillTimer(hwnd,TIMER_TRIM_GRAPHICS);if(!IsWindowVisible(hwnd))app->surface.trim();}
@@ -481,7 +488,7 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
             return 0;
         case WM_CLIPBOARDUPDATE:if(app->historyEnabled&&GetClipboardSequenceNumber()!=app->ownSequence)SetEvent(app->captureEvent);return 0;
         case MSG_APPS:{std::unique_ptr<std::vector<AppEntry>> found(reinterpret_cast<std::vector<AppEntry>*>(lp));app->apps=std::move(*found);app->apply_usage();app->indexing=false;app->rebuild();app->settings_refresh_commands();return 0;}
-        case MSG_CLIP:{std::unique_ptr<CapturedText> item(reinterpret_cast<CapturedText*>(lp));if(item->generation==app->historyGeneration)app->accept_clip(item->sequence,std::move(item->text));return 0;}
+        case MSG_CLIP:{std::unique_ptr<CapturedClipboard> item(reinterpret_cast<CapturedClipboard*>(lp));if(item->generation==app->historyGeneration)app->accept_clip(item->sequence,std::move(item->text),std::move(item->dib));return 0;}
         case MSG_RATE:{std::unique_ptr<RateSnapshot> snapshot(reinterpret_cast<RateSnapshot*>(lp));app->rateBusy=false;app->rateError=snapshot->error;if(snapshot->error.empty()){app->rates.clear();for(auto& rate:snapshot->rates)app->rates[rate.to]=std::move(rate);app->rateFetchedOn=app->today();app->save_rates();}app->rebuild();return 0;}
         case MSG_CAMERA:if(app->mode==Mode::Camera&&IsWindowVisible(hwnd)){if(app->cameraPending&&!app->camera.running())app->cameraPending=!app->camera.start(hwnd,MSG_CAMERA,app->cameraDevice);app->invalidate();}return 0;
         case MSG_STATUS:app->storage_status(wp,static_cast<uint64_t>(lp));return 0;
@@ -492,13 +499,15 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
         case WM_ENTERSIZEMOVE:app->popup=0;app->hover=-1;app->invalidate();return 0;
         case WM_EXITSIZEMOVE:app->remember_position();if(GetForegroundWindow()==hwnd)SetFocus(app->edit);return 0;
         case WM_LBUTTONDOWN:case WM_LBUTTONDBLCLK:app->click_palette(GET_X_LPARAM(lp)/app->scale,GET_Y_LPARAM(lp)/app->scale,msg==WM_LBUTTONDBLCLK);return 0;
-        case WM_MOUSEMOVE:{TRACKMOUSEEVENT tracking{sizeof(tracking),TME_LEAVE,hwnd,0};TrackMouseEvent(&tracking);float x=GET_X_LPARAM(lp)/app->scale,y=GET_Y_LPARAM(lp)/app->scale;if(app->popup){auto r=app->popup_bounds();if(x>=r.left&&x<r.right&&y>=r.top+32&&y<r.bottom-6){int selected=int((y-r.top-32)/32);if(selected!=app->popupSelected){app->popupSelected=selected;app->invalidate();}}return 0;}int h=app->row_at(x,y);if(h!=app->hover){app->hover=h;app->invalidate();}return 0;}
+        case WM_LBUTTONUP:if(app->scrollbarDragging){app->scrollbarDragging=false;ReleaseCapture();app->invalidate();}return 0;
+        case WM_CAPTURECHANGED:app->scrollbarDragging=false;app->invalidate();return 0;
+        case WM_MOUSEMOVE:{if(app->scrollbarDragging){app->drag_scrollbar(GET_Y_LPARAM(lp)/app->scale);return 0;}TRACKMOUSEEVENT tracking{sizeof(tracking),TME_LEAVE,hwnd,0};TrackMouseEvent(&tracking);float x=GET_X_LPARAM(lp)/app->scale,y=GET_Y_LPARAM(lp)/app->scale;if(app->popup){auto r=app->popup_bounds();float top=app->popup_items_top();if(x>=r.left&&x<r.right&&y>=top&&y<top+float(app->popupActions.size())*32){int selected=int((y-top)/32);if(selected!=app->popupSelected){app->popupSelected=selected;app->invalidate();}}return 0;}int h=app->row_at(x,y);if(h!=app->hover){app->hover=h;app->invalidate();}return 0;}
         case WM_MOUSELEAVE:app->hover=-1;app->invalidate();return 0;
         case WM_MOUSEWHEEL:app->wheel(GET_WHEEL_DELTA_WPARAM(wp));return 0;
         case WM_DPICHANGED:{auto* r=reinterpret_cast<RECT*>(lp);SetWindowPos(hwnd,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);app->layout();app->invalidate();return 0;}
         case WM_DISPLAYCHANGE:app->tray(true);app->invalidate();return 0; // Restore/clamp on the next show, without visible intermediate moves.
         case WM_SIZE:if(app->target){if(!app->surface.resize(LOWORD(lp),HIWORD(lp)))app->release_graphics();app->invalidate();}return 0;
-        case WM_ACTIVATEAPP:if(!wp&&IsWindowVisible(hwnd))app->hide(false);return 0;
+        case WM_ACTIVATEAPP:if(!wp&&!app->inspectWindow&&IsWindowVisible(hwnd))app->hide(false);return 0;
         case WM_TIMECHANGE:if(app->expire_history()&&app->resultMode==Mode::Clipboard)app->rebuild();return 0;
         case WM_POWERBROADCAST:if(wp==PBT_APMSUSPEND){app->cameraPending=false;app->camera.stop();}else if(wp==PBT_APMRESUMEAUTOMATIC){if(app->expire_history()&&app->resultMode==Mode::Clipboard)app->rebuild();}return TRUE;
         case WM_WTSSESSION_CHANGE:if(wp==WTS_SESSION_LOCK){app->cameraPending=false;app->camera.stop();}return 0;
@@ -534,7 +543,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR args,int){
     const auto paletteClass=instance_class(profile);
     HWND existing=FindWindowW(paletteClass.c_str(),nullptr);if(existing){if(!background)PostMessageW(existing,MSG_SHOW,0,0);CoUninitialize();return 0;}
     INITCOMMONCONTROLSEX cc{sizeof(cc),ICC_STANDARD_CLASSES|ICC_WIN95_CLASSES};InitCommonControlsEx(&cc);
-    auto application=std::make_unique<App>(instance,overrideDir);app=application.get();app->smoke=smoke;
+    auto application=std::make_unique<App>(instance,overrideDir);app=application.get();app->smoke=smoke;app->inspectWindow=inspect;
     WNDCLASSEXW wc{sizeof(wc)};wc.hInstance=instance;wc.lpfnWndProc=window_proc;wc.lpszClassName=paletteClass.c_str();wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=app->brandIcons.large();wc.hIconSm=app->brandIcons.small();wc.style=CS_DROPSHADOW|CS_DBLCLKS;RegisterClassExW(&wc);
     wc.lpfnWndProc=settings_proc;wc.lpszClassName=L"MinicastSettings";wc.hbrBackground=GetSysColorBrush(COLOR_BTNFACE);RegisterClassExW(&wc);
     DWORD extendedStyle=WS_EX_TOPMOST|(inspect?WS_EX_APPWINDOW:WS_EX_TOOLWINDOW);
@@ -545,7 +554,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR args,int){
     app->surface.set_transparent_input(search_input_is_composited(app->edit));set_search_input_theme(app->edit,app->light);
     SendMessageW(app->edit,EM_SETLIMITTEXT,256,0);SetWindowSubclass(app->edit,edit_proc,1,0);app->layout();
     app->settingsFont=CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
-    app->load_settings();app->setup_startup();app->load_usage();app->load_apps();app->apply_usage();app->load_rates();app->start_clipboard();AddClipboardFormatListener(app->hwnd);WTSRegisterSessionNotification(app->hwnd,NOTIFY_FOR_THIS_SESSION);app->tray();app->hint();app->scan_apps();app->refresh_rates();app->rebuild();
+    app->load_settings();app->setup_startup();app->load_usage();app->load_apps();app->apply_usage();app->load_rates();app->start_clipboard();AddClipboardFormatListener(app->hwnd);if(app->historyEnabled)SetEvent(app->captureEvent);WTSRegisterSessionNotification(app->hwnd,NOTIFY_FOR_THIS_SESSION);app->tray();app->hint();app->scan_apps();app->refresh_rates();app->rebuild();
     app->readyMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-app->launchTime).count();
     if(!background)app->show(Mode::Home,false);if(app->smoke)SetTimer(app->hwnd,TIMER_SMOKE,2000,nullptr);
     MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){

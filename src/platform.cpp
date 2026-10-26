@@ -1,6 +1,7 @@
 #include "platform.hpp"
 #include "app_shell.hpp"
 #include "history_retention.hpp"
+#include "clipboard_image.hpp"
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shellapi.h>
@@ -50,11 +51,12 @@ bool save_history(const std::filesystem::path& path,const std::vector<HistoryIte
     size_t characters=0;
     for(const auto& item:items){
         if(item.text.size()>history_max_item_characters)return false;
-        characters+=item.text.size();
+        if(item.dib.size()>history_max_image_bytes || (!item.dib.empty() && normalize_clipboard_dib(item.dib.data(),item.dib.size())!=item.dib))return false;
+        characters+=item.text.size()+item.dib.size()/sizeof(wchar_t);
         if(characters>history_max_bytes/sizeof(wchar_t))return false;
     }
-    std::vector<unsigned char> plain{'M','C','H','1'};append32(plain,static_cast<uint32_t>(items.size()));
-    for(auto& item:items){auto s=narrow(item.text);append32(plain,static_cast<uint32_t>(s.size()));append32(plain,static_cast<uint32_t>(item.timestamp));append32(plain,static_cast<uint32_t>(item.timestamp>>32));plain.insert(plain.end(),s.begin(),s.end());}
+    std::vector<unsigned char> plain{'M','C','H','2'};append32(plain,static_cast<uint32_t>(items.size()));
+    for(auto& item:items){auto s=narrow(item.text);append32(plain,static_cast<uint32_t>(s.size()));append32(plain,static_cast<uint32_t>(item.timestamp));append32(plain,static_cast<uint32_t>(item.timestamp>>32));plain.insert(plain.end(),s.begin(),s.end());append32(plain,static_cast<uint32_t>(item.dib.size()));plain.insert(plain.end(),item.dib.begin(),item.dib.end());}
     DATA_BLOB input{static_cast<DWORD>(plain.size()),plain.data()},output{};
     bool protectedData=CryptProtectData(&input,L"Minicast clipboard",nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&output)!=FALSE;
     SecureZeroMemory(plain.data(),plain.size());if(!protectedData)return false;
@@ -62,12 +64,12 @@ bool save_history(const std::filesystem::path& path,const std::vector<HistoryIte
 }
 std::vector<HistoryItem> load_history(const std::filesystem::path& path,int retentionDays,bool* pruned){
     if(pruned)*pruned=false;
-    auto data=read_bytes(path,8*1024*1024);if(data.empty())return {};DATA_BLOB input{static_cast<DWORD>(data.size()),data.data()},out{};if(!CryptUnprotectData(&input,nullptr,nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&out))return {};
-    std::vector<HistoryItem> items;size_t at=4;bool valid=out.cbData>=8&&memcmp(out.pbData,"MCH1",4)==0;
+    auto data=read_bytes(path,256*1024*1024);if(data.empty())return {};DATA_BLOB input{static_cast<DWORD>(data.size()),data.data()},out{};if(!CryptUnprotectData(&input,nullptr,nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&out))return {};
+    std::vector<HistoryItem> items;size_t at=4;bool version2=out.cbData>=8&&memcmp(out.pbData,"MCH2",4)==0;bool valid=version2||(out.cbData>=8&&memcmp(out.pbData,"MCH1",4)==0);
     auto read=[&]()->uint32_t{if(at+4>out.cbData){valid=false;return 0;}uint32_t n=0;for(int i=0;i<4;i++)n|=uint32_t(out.pbData[at++])<<(8*i);return n;};
     auto count=valid?read():0;if(count>500)valid=false;
     FILETIME now;GetSystemTimeAsFileTime(&now);uint64_t ticks=(uint64_t(now.dwHighDateTime)<<32)|now.dwLowDateTime;
-    for(uint32_t i=0;valid&&i<count;i++){auto len=read();uint64_t timestamp=read();timestamp|=uint64_t(read())<<32;if(len>history_max_item_utf8_bytes||at+len>out.cbData){valid=false;break;}auto text=widen(std::string(reinterpret_cast<char*>(out.pbData+at),len));at+=len;if(text.size()>history_max_item_characters){valid=false;break;}items.push_back({std::move(text),timestamp});}
+    for(uint32_t i=0;valid&&i<count;i++){auto len=read();uint64_t timestamp=read();timestamp|=uint64_t(read())<<32;if(len>history_max_item_utf8_bytes||at+len>out.cbData){valid=false;break;}auto text=widen(std::string(reinterpret_cast<char*>(out.pbData+at),len));at+=len;if(text.size()>history_max_item_characters){valid=false;break;}std::vector<unsigned char> dib;if(version2){auto imageLen=read();if(!valid||imageLen>history_max_image_bytes||imageLen>out.cbData-at){valid=false;break;}if(imageLen){dib.assign(out.pbData+at,out.pbData+at+imageLen);if(normalize_clipboard_dib(dib.data(),dib.size())!=dib){valid=false;break;}}at+=imageLen;}items.push_back({std::move(text),timestamp,std::move(dib)});}
     SecureZeroMemory(out.pbData,out.cbData);LocalFree(out.pbData);if(!valid)return {};const bool changed=prune_history(items,ticks,retentionDays);if(pruned)*pruned=changed;return items;
 }
 struct Internet {HINTERNET h=nullptr;explicit Internet(HINTERNET x):h(x){}~Internet(){if(h)WinHttpCloseHandle(h);}operator HINTERNET()const{return h;}};

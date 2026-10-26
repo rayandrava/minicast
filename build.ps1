@@ -60,6 +60,10 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Clipboard history test compilation failed' }
     & '.\build\history_tests.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Clipboard history tests failed' }
+    & $compiler @common 'tests/smooth_scroll_tests.cpp' '-o' 'build/smooth_scroll_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Smooth scroll test compilation failed' }
+    & '.\build\smooth_scroll_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Smooth scroll tests failed' }
     & $compiler @common 'tests/search_metrics_tests.cpp' '-o' 'build/search_metrics_tests.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Search DPI test compilation failed' }
     & '.\build\search_metrics_tests.exe'
@@ -72,10 +76,14 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Instance identity test compilation failed' }
     & '.\build\instance_identity_tests.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Instance identity tests failed' }
-    & $compiler @common 'tests/storage_tests.cpp' 'src/platform.cpp' 'src/core.cpp' '-o' 'build/storage_tests.exe' '-lshell32' '-lole32' '-luuid' '-luser32' '-lcrypt32' '-lwinhttp'
+    & $compiler @common 'tests/storage_tests.cpp' 'src/platform.cpp' 'src/core.cpp' '-lwindowscodecs' '-o' 'build/storage_tests.exe' '-lshell32' '-lole32' '-luuid' '-luser32' '-lcrypt32' '-lwinhttp'
     if ($LASTEXITCODE -ne 0) { throw 'Storage test compilation failed' }
     & '.\build\storage_tests.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Storage tests failed' }
+    & $compiler @common 'tests/clipboard_image_tests.cpp' 'src/platform.cpp' 'src/core.cpp' '-o' 'build/clipboard_image_tests.exe' '-lshell32' '-lole32' '-luuid' '-luser32' '-lcrypt32' '-lwinhttp' '-lwindowscodecs'
+    if ($LASTEXITCODE -ne 0) { throw 'Clipboard image test compilation failed' }
+    & '.\build\clipboard_image_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Clipboard image tests failed' }
     & $compiler @common 'tests/camera_image_tests.cpp' 'src/camera.cpp' 'src/platform.cpp' 'src/core.cpp' '-o' 'build/camera_image_tests.exe' '-lole32' '-luuid' '-lwindowscodecs' '-lmfplat' '-lmfreadwrite' '-lmfuuid' '-lmf' '-luser32' '-lshell32' '-lcrypt32' '-lwinhttp'
     if ($LASTEXITCODE -ne 0) { throw 'Camera image test compilation failed' }
     & '.\build\camera_image_tests.exe'

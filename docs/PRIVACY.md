@@ -22,16 +22,16 @@ Normal data is stored in `%LOCALAPPDATA%\Minicast`. If Windows cannot provide th
 | `apps.cache` | Indexed application names and local launch targets, which can include usernames in paths | Plain text; standard filesystem permissions |
 | `usage.cache` | App launch counts and emoji usage counts for local ranking | Plain text; standard filesystem permissions |
 | `rates.cache` | Exchange-rate values, dates and successful fetch day | Plain text; standard filesystem permissions |
-| `clipboard.bin` | Captured text and timestamps | Windows DPAPI encryption for the current Windows user |
+| `clipboard.bin` | Captured text, bitmap images and timestamps | Windows DPAPI encryption for the current Windows user |
 | `smoke-report.txt` | Local memory, handle, app-count and readiness measurements when the developer `--smoke` option is explicitly used | Plain text; standard filesystem permissions |
 
 Temporary `.tmp` siblings may exist during atomic writes. App icons are cached in bounded memory; Minicast does not publish or upload them. Search queries are not stored as a query history, though text deliberately copied through the system clipboard may be captured when history is enabled.
 
 ## Clipboard history
 
-History starts disabled. When enabled, Minicast listens for clipboard changes and captures text only. It skips entries marked `ExcludeClipboardContentFromMonitor` or explicitly disallowed by `CanIncludeInClipboardHistory` when those markers are supplied. This does not guarantee that password managers or other apps mark every sensitive item.
+History starts disabled. When enabled, Minicast listens for clipboard changes and captures text, PNG and Windows bitmap images. It skips entries marked `ExcludeClipboardContentFromMonitor` or explicitly disallowed by `CanIncludeInClipboardHistory` when those markers are supplied. This does not guarantee that password managers or other apps mark every sensitive item.
 
-Retention is configurable to **7, 14, or 30 days**. The collection is additionally capped at 500 entries and approximately 4 MiB of text, with a 64 KiB capture-size limit per clipboard allocation. Expiry is applied when history is loaded, as entries are captured, when retention changes, and by a timer while the loaded history is in memory. When Minicast is closed or history has not been loaded, it cannot continuously remove expired bytes from disk.
+Retention is configurable to **7, 14, or 30 days**. The collection is additionally capped at 500 entries and approximately 128 MiB of text and bitmap image data, with a 64 KiB text capture-size limit and a 64 MiB image limit. Expiry is applied when history is loaded, as entries are captured, when retention changes, and by a timer while the loaded history is in memory. When Minicast is closed or history has not been loaded, it cannot continuously remove expired bytes from disk.
 
 Pausing capture stops new entries; it does not erase existing history. **Clear history** removes entries from the active collection and queues an encrypted empty history for saving. File write failures are reported. The system clipboard, screenshots, external backups and filesystem recovery copies are not erased by this action.
 

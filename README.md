@@ -9,9 +9,13 @@ A small, keyboard-first Windows launcher. Native C++20, Win32, Direct2D and Dire
 - Launch installed apps, with real app icons and your five most-used Minicast launches first.
 - Calculate and convert currencies, units and times in one search field.
 - Find emoji and paste them into your previous app.
-- Keep optional, locally encrypted text clipboard history for 7, 14 or 30 days.
+- Keep optional, locally encrypted text and image clipboard history for 7, 14 or 30 days.
 - Open a webcam mirror with optional PNG snapshots.
 - Configure global shortcuts for the launcher, features and individual apps.
+
+Clipboard history has All Types, Text and Images filters, image previews, pixel dimensions and stored size. PNG and Windows bitmap clipboard formats are supported.
+
+Overflowing result lists and the emoji grid have draggable scrollbars and smooth pixel scrolling. Scrolling keeps selection unchanged; arrow keys navigate selections.
 
 The palette follows your Windows app theme. It can run from the tray, start at sign-in, and be dragged around the screen. The double-crescent logo and the application are original project assets. Raycast and Tinycast inspired the interaction; this project is independent and unaffiliated with either.
 
@@ -34,7 +38,7 @@ Default launcher shortcut: **Ctrl+Alt+Space**. Open Settings with the slider ico
 | `time Tokyo` | Current time in a city |
 | `9am Jakarta to London tomorrow` | Convert between time zones |
 | `emoji happy` | Find an emoji |
-| `clipboard invoice` | Search retained clipboard text |
+| `clipboard invoice` | Search retained clipboard text or `image` |
 | `camera` | Open the webcam mirror |
 | `refresh apps` / `refresh rates` | Refresh the respective cache |
 | `about minicast` | Show the build version |
@@ -57,13 +61,13 @@ Maintainers: the [release pipeline](docs/RELEASING.md) tests and packages versio
 
 ## Privacy and limits
 
-- Clipboard history is **off by default**, text-only, limited to 500 entries / 4 MiB, and encrypted with Windows user-scoped DPAPI. Retention is configurable. Recognized clipboard exclusion markers are honored; universal password detection is not promised.
+- Clipboard history is **off by default**, supports text and bitmap images, limited to 500 entries / 128 MiB (64 MiB per image), and encrypted with Windows user-scoped DPAPI. Retention is configurable. Recognized clipboard exclusion markers are honored; universal password detection is not promised.
 - App names/paths, usage ranking, preferences and daily exchange-rate caches are stored locally. Clipboard contents and search queries are not sent to the currency provider.
 - Rates come from Frankfurter over HTTPS, refreshed once per local day at launch. Cached rates work offline. These are dated reference rates, not bank quotes.
 - Camera frames stay in memory unless you explicitly save or copy a snapshot. Audio is not captured.
 - The app adds no service, scheduled task or global keyboard hook. Updates are user-initiated.
 
-See [privacy details](docs/PRIVACY.md), [security reporting](SECURITY.md) and [validation status](docs/VALIDATION.md). Known gaps include clipboard images, complete result-list accessibility, full emoji/CLDR coverage, code signing, and testing across more cameras, keyboard layouts and mixed-DPI monitor setups.
+See [privacy details](docs/PRIVACY.md), [security reporting](SECURITY.md) and [validation status](docs/VALIDATION.md). Known gaps include complete result-list accessibility, full emoji/CLDR coverage, code signing, and testing across more cameras, keyboard layouts and mixed-DPI monitor setups.
 
 ## Build and test
 

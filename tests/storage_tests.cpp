@@ -1,4 +1,5 @@
 #include "platform.hpp"
+#include "clipboard_image.hpp"
 #include "history_retention.hpp"
 #include "pending_save.hpp"
 #include <iostream>
@@ -30,6 +31,26 @@ int main(){
         equal=restored[i].text==original[i].text&&restored[i].timestamp==original[i].timestamp;
     check(equal,"Unicode text and timestamps round-trip through DPAPI");
 
+    BITMAPINFOHEADER header{};header.biSize=40;header.biWidth=2;header.biHeight=2;header.biPlanes=1;header.biBitCount=24;
+    std::vector<unsigned char> raw(56);memcpy(raw.data(),&header,40);raw[40]=11;raw[48]=22;
+    auto png=read_bytes(std::filesystem::current_path()/L"assets"/L"brand"/L"double-crescent.png",history_max_image_bytes);
+    auto pngDib=decode_clipboard_png(png.data(),png.size());
+    check(!pngDib.empty()&&normalize_clipboard_dib(pngDib.data(),pngDib.size())==pngDib,"PNG clipboard bytes decode to valid stored bitmap");
+    check(decode_clipboard_png(raw.data(),raw.size()).empty(),"invalid PNG clipboard data rejected");
+    auto dib=normalize_clipboard_dib(raw.data(),raw.size());
+    check(dib.size()==56&&dib[40]==22&&dib[48]==11&&dib[43]==255,"bottom-up padded 24-bit image converts to opaque top-down BGRA");
+    check(normalize_clipboard_dib(raw.data(),55).empty(),"truncated image is rejected");
+    header.biWidth=LONG_MAX;memcpy(raw.data(),&header,40);
+    check(normalize_clipboard_dib(raw.data(),raw.size()).empty(),"oversized image dimensions are rejected before allocation");
+    original.push_back({L"Image",now-400,dib});
+    check(save_history(path,original),"save mixed text and image history encrypted");
+    restored=load_history(path,7);
+    check(restored.size()==original.size()&&restored.back().dib==dib,"image pixels round-trip through encrypted storage");
+    auto expired=original;expired.back().timestamp=now-8*history_ticks_per_day;
+    check(prune_history(expired,now,7)&&expired.size()==original.size()-1,"images follow retention policy");
+    auto invalid=original;invalid.back().dib.pop_back();
+    check(!save_history(path,invalid),"malformed image does not replace stored history");
+
     std::vector<HistoryItem> maximum{{std::wstring(history_max_item_characters,L'\u6F22'),now}};
     check(narrow(maximum[0].text).size()==history_max_item_utf8_bytes,"worst-case UTF-8 bound matches UTF-16 input bound");
     check(save_history(path,maximum),"maximum captured UTF-16 entry can be saved");
@@ -40,7 +61,7 @@ int main(){
     restored=load_history(path,7);
     check(restored.size()==1&&restored[0].text==maximum[0].text,"rejected oversized save preserves previous data");
     check(!save_history(path,std::vector<HistoryItem>(history_max_items+1,{L"x",now})),"oversized entry count rejected");
-    check(!save_history(path,std::vector<HistoryItem>(65,maximum[0])),"oversized total history budget rejected");
+    check(!save_history(path,std::vector<HistoryItem>(history_max_bytes/(maximum[0].text.size()*sizeof(wchar_t))+1,maximum[0])),"oversized total history budget rejected");
 
     check(save_history(path,original),"prepare saved data for clear failure");
     PendingSave<std::vector<HistoryItem>> pending;
